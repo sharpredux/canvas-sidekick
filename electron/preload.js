@@ -24,5 +24,8 @@ contextBridge.exposeInMainWorld('api', {
   setStartupStatus: (enabled) => ipcRenderer.send('set-startup', enabled),
   saveSchedule: (rawText) => ipcRenderer.send('save-schedule', rawText),
   loadSchedule: () => ipcRenderer.invoke('load-schedule'),
-  resizeWindow: (sizeName) => ipcRenderer.send('resize-window', sizeName)
+  resizeWindow: (sizeName) => ipcRenderer.send('resize-window', sizeName),
+  llmChat: (messages) => ipcRenderer.invoke('llm-chat', messages),
+  llmParseCommand: (userInput) => ipcRenderer.invoke('llm-parse-command', userInput),
+  llmEstimateTask: (taskTitle, deadline) => ipcRenderer.invoke('llm-estimate-task', taskTitle, deadline)
 });

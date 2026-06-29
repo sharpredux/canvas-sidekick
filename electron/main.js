@@ -608,6 +608,115 @@ function registerIpcAndSessionHandlers() {
     console.log(`[poll] Starting main-process polling for ${schoolUrl}`);
     startPolling(schoolUrl, mainWindow.webContents);
   });
+
+  // ─── LLM IPC Handlers ───────────────────────────────────────────────────────
+  const LLM_MODEL = 'qwen2.5:3b';
+  const OLLAMA_API = 'http://127.0.0.1:11434/api';
+
+  ipcMain.handle('llm-chat', async (event, messages) => {
+    try {
+      const res = await net.fetch(`${OLLAMA_API}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: LLM_MODEL,
+          messages,
+          stream: false
+        })
+      });
+      if (!res.ok) throw new Error('Ollama chat failed');
+      const data = await res.json();
+      return data;
+    } catch (err) {
+      console.error('[llm] chat error:', err);
+      throw err;
+    }
+  });
+
+  ipcMain.handle('llm-parse-command', async (event, userInput) => {
+    const schema = {
+      type: "object",
+      properties: {
+        intent: { type: "string", enum: ["delete_meeting", "add_task", "unknown"] },
+        details: { type: "string" },
+        taskTitle: { type: "string" },
+        taskDueDate: { type: "string" }
+      },
+      required: ["intent"]
+    };
+
+    try {
+      const res = await net.fetch(`${OLLAMA_API}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: LLM_MODEL,
+          messages: [{
+            role: "system",
+            content: "You are a command router. Parse the user's intent into structured JSON. If the intent is 'add_task', extract the task details into 'taskTitle' and 'taskDueDate'."
+          }, {
+            role: "user",
+            content: userInput
+          }],
+          format: schema,
+          stream: false
+        })
+      });
+      if (!res.ok) throw new Error('Ollama command parsing failed');
+      const data = await res.json();
+      return JSON.parse(data.message.content);
+    } catch (err) {
+      console.error('[llm] parse-command error:', err);
+      throw err;
+    }
+  });
+
+  ipcMain.handle('llm-estimate-task', async (event, taskTitle, deadline) => {
+    const schema = {
+      type: "object",
+      properties: {
+        difficulty: { type: "string", enum: ["easy", "medium", "hard"] },
+        estimatedHours: { type: "number" }
+      },
+      required: ["difficulty", "estimatedHours"]
+    };
+
+    const systemPrompt = `You are an expert Task Estimator. 
+Evaluate task difficulty and time based on title and deadlines.
+Respond ONLY in JSON.
+
+Examples:
+User: Title: "Read Chapter 5", Deadline: "Next week"
+Output: {"difficulty": "easy", "estimatedHours": 2}
+
+User: Title: "Final Project Implementation", Deadline: "Tomorrow"
+Output: {"difficulty": "hard", "estimatedHours": 12}
+
+User: Title: "Weekly Quiz", Deadline: "In 2 days"
+Output: {"difficulty": "medium", "estimatedHours": 1}`;
+
+    try {
+      const res = await net.fetch(`${OLLAMA_API}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: LLM_MODEL,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: `Title: "${taskTitle}", Deadline: "${deadline}"` }
+          ],
+          format: schema,
+          stream: false
+        })
+      });
+      if (!res.ok) throw new Error('Ollama task estimation failed');
+      const data = await res.json();
+      return JSON.parse(data.message.content);
+    } catch (err) {
+      console.error('[llm] estimate-task error:', err);
+      throw err;
+    }
+  });
 }
 
 function registerPowerMonitorHandlers() {

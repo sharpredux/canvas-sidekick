@@ -8,6 +8,7 @@ import AddTaskForm from './components/AddTaskForm';
 import AuthModal from './components/AuthModal';
 import ScheduleSettings from './components/ScheduleSettings';
 import SkeletonAgendaItem from './components/SkeletonAgendaItem';
+import AIChatTab from './components/AIChatTab';
 import { parseScheduleTSV } from './utils/scheduleParser';
 
 const MOCK_ITEMS = [
@@ -63,11 +64,74 @@ export default function App() {
 
   // ── Core data merge ────────────────────────────────────────────────────────
   const mergeItems = useCallback((newItems) => {
-    const mergedCanvasItems = newItems.map(item =>
-      completedIdsRef.current.has(item.id) ? { ...item, completed: true } : item
-    );
-    setItems([...mergedCanvasItems, ...manualTasksRef.current]);
+    const isMock = newItems === MOCK_ITEMS;
+    
+    if (!isMock) {
+      const currentPersisted = manualTasksRef.current;
+      const persistedMap = new Map(currentPersisted.map(t => [t.id, t]));
+      
+      newItems.forEach(item => {
+        if (persistedMap.has(item.id)) {
+          const existing = persistedMap.get(item.id);
+          persistedMap.set(item.id, { 
+            ...item, 
+            timeEstimate: item.timeEstimate || existing.timeEstimate,
+            completed: completedIdsRef.current.has(item.id) || existing.completed 
+          });
+        } else {
+          persistedMap.set(item.id, {
+            ...item,
+            completed: completedIdsRef.current.has(item.id) || !!item.completed
+          });
+        }
+      });
+      
+      const mergedArray = Array.from(persistedMap.values());
+      manualTasksRef.current = mergedArray;
+      localStorage.setItem('manualTasks', JSON.stringify(mergedArray));
+      
+      setItems(mergedArray);
+    } else {
+      const mergedCanvasItems = newItems.map(item =>
+        completedIdsRef.current.has(item.id) ? { ...item, completed: true } : item
+      );
+      setItems([...mergedCanvasItems, ...manualTasksRef.current]);
+    }
   }, []);
+
+  // ── Auto Task Estimator ────────────────────────────────────────────────────
+  const estimatingIdsRef = useRef(new Set());
+  
+  useEffect(() => {
+    if (!window.api?.llmEstimateTask) return;
+    
+    items.forEach(item => {
+      if (item.type === 'deadline' && !item.timeEstimate && !estimatingIdsRef.current.has(item.id)) {
+        estimatingIdsRef.current.add(item.id);
+        
+        window.api.llmEstimateTask(item.title, item.dueDate || item.date)
+          .then(res => {
+            const estimateStr = `${res.estimatedHours} hr (${res.difficulty})`;
+            setItems(prev => {
+              const updated = prev.map(i => i.id === item.id ? { ...i, timeEstimate: estimateStr } : i);
+              // Always write to manualTasksRef as part of the core merge logic
+              const existing = manualTasksRef.current.find(m => m.id === item.id);
+              if (existing) {
+                existing.timeEstimate = estimateStr;
+              } else {
+                manualTasksRef.current.push({ ...item, timeEstimate: estimateStr });
+              }
+              localStorage.setItem('manualTasks', JSON.stringify(manualTasksRef.current));
+              return updated;
+            });
+          })
+          .catch(err => {
+            console.error('Failed to estimate task:', err);
+            estimatingIdsRef.current.delete(item.id);
+          });
+      }
+    });
+  }, [items]);
 
   // ── Auth ───────────────────────────────────────────────────────────────────
   const handleAuthenticated = useCallback(async (url) => {
@@ -266,8 +330,8 @@ export default function App() {
     today.setHours(0, 0, 0, 0);
 
     let filtered = items.filter(item => {
-      // Hide completed tasks from previous days
-      if (item.completed) {
+      // Hide completed tasks from previous days EXCEPT in Calendar view
+      if (item.completed && activeTab !== 'Calendar') {
         const itemDate = new Date(item.dueDate || item.date);
         if (itemDate < today) return false;
       }
@@ -368,6 +432,14 @@ export default function App() {
             onManualRefresh={forceRefreshCanvas}
             currentSize={widgetSize}
             onSizeChange={handleSizeChange}
+          />
+        ) : activeTab === 'AI Chat' ? (
+          <AIChatTab 
+            widgetSize={widgetSize} 
+            items={items}
+            setItems={setItems}
+            toggleItemComplete={toggleItemComplete}
+            addNewItem={addNewItem}
           />
         ) : activeTab === 'Calendar' ? (
           <CalendarView

@@ -406,14 +406,23 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
           // Heatmap logic
           let bg = 'transparent';
           let border = '1px solid var(--md-sys-color-surface-container-high)';
+          let color = '#fff';
           let cursor = (count > 0 || hasClass) ? 'pointer' : 'default';
           
-          if (count > 0 && count < 3) {
-            bg = 'rgba(255, 149, 0, 0.4)';
-            border = '1px solid rgba(255, 149, 0, 0.4)';
-          } else if (count >= 3) {
-            bg = 'var(--md-sys-color-error)';
-            border = '1px solid var(--md-sys-color-error)';
+          const allCompleted = count > 0 && tasksOnDay.every(t => t.completed);
+          
+          if (count > 0) {
+            if (allCompleted) {
+              bg = 'rgba(40, 200, 64, 0.2)';
+              border = '1px solid rgba(40, 200, 64, 0.5)';
+              color = 'rgba(40, 200, 64, 1)';
+            } else if (count < 3) {
+              bg = 'rgba(255, 149, 0, 0.4)';
+              border = '1px solid rgba(255, 149, 0, 0.4)';
+            } else {
+              bg = 'var(--md-sys-color-error)';
+              border = '1px solid var(--md-sys-color-error)';
+            }
           }
 
           return (
@@ -426,7 +435,7 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
                 borderRadius: '50%',
                 background: bg,
                 border: border,
-                color: '#fff',
+                color: color,
                 fontSize: '11px',
                 fontWeight: (count > 0 || hasClass) ? 'bold' : 'normal',
                 cursor: cursor,
