@@ -89,7 +89,7 @@ export default function AIChatTab({ widgetSize, setItems, addNewItem }) {
 
   const checkModel = useCallback(async () => {
     try {
-      const res = await fetch('http://localhost:11434/api/tags');
+      const res = await fetch('http://127.0.0.1:11434/api/tags');
       if (res.ok) {
         const data = await res.json();
         const hasModel = data.models?.some(m => m.name === 'qwen2.5:3b' || m.name === 'qwen2.5:3b-instruct' || m.name.includes('qwen2.5:3b'));
@@ -108,7 +108,7 @@ export default function AIChatTab({ widgetSize, setItems, addNewItem }) {
   const checkOllama = useCallback(async () => {
     setOllamaStatus('checking');
     try {
-      const res = await fetch('http://localhost:11434/api/version');
+      const res = await fetch('http://127.0.0.1:11434/api/version');
       if (res.ok) {
         setOllamaStatus('online');
         checkModel();
@@ -129,7 +129,7 @@ export default function AIChatTab({ widgetSize, setItems, addNewItem }) {
     setModelStatus('pulling');
     setPullProgress(0);
     try {
-      const response = await fetch('http://localhost:11434/api/pull', {
+      const response = await fetch('http://127.0.0.1:11434/api/pull', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'qwen2.5:3b' })

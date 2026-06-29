@@ -433,6 +433,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      webSecurity: false,
       preload: path.join(__dirname, 'preload.js'),
       zoomFactor: 0.75,
       backgroundThrottling: true // Allow OS to throttle timers when widget is not focused
