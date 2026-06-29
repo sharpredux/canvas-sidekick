@@ -90,12 +90,12 @@ export default function App() {
       manualTasksRef.current = mergedArray;
       localStorage.setItem('manualTasks', JSON.stringify(mergedArray));
       
-      setItems(mergedArray);
+      setItems(mergedArray.map(m => m.isManual ? { ...m, isCustom: true } : m));
     } else {
       const mergedCanvasItems = newItems.map(item =>
         completedIdsRef.current.has(item.id) ? { ...item, completed: true } : item
       );
-      setItems([...mergedCanvasItems, ...manualTasksRef.current]);
+      setItems([...mergedCanvasItems, ...manualTasksRef.current.map(m => ({ ...m, isCustom: true }))]);
     }
   }, []);
 
@@ -113,7 +113,16 @@ export default function App() {
           .then(res => {
             const estimateStr = `${res.estimatedHours} hr (${res.difficulty})`;
             setItems(prev => {
-              const updated = prev.map(i => i.id === item.id ? { ...i, timeEstimate: estimateStr } : i);
+              const existsInPrev = prev.some(i => i.id === item.id);
+              if (!existsInPrev) {
+                return prev;
+              }
+              const updated = prev.map(i => {
+                if (i.id === item.id) {
+                  return { ...i, timeEstimate: estimateStr, isCustom: i.isManual ? true : i.isCustom };
+                }
+                return i;
+              });
               // Always write to manualTasksRef as part of the core merge logic
               const existing = manualTasksRef.current.find(m => m.id === item.id);
               if (existing) {
@@ -304,9 +313,24 @@ export default function App() {
     });
   }, []);
 
+  // ── Delete custom task ──────────────────────────────────────────────────────
+  const deleteCustomTask = useCallback((id) => {
+    setItems(prevItems => prevItems.filter(item => item.id !== id));
+    manualTasksRef.current = manualTasksRef.current.filter(item => item.id !== id);
+    localStorage.setItem('manualTasks', JSON.stringify(manualTasksRef.current));
+    
+    if (completedIdsRef.current.has(id)) {
+      completedIdsRef.current.delete(id);
+      localStorage.setItem(
+        'localCompletedIds',
+        JSON.stringify(Array.from(completedIdsRef.current))
+      );
+    }
+  }, []);
+
   // ── Add manual task ────────────────────────────────────────────────────────
   const addNewItem = useCallback((newItem) => {
-    const newManualItem = { ...newItem, isManual: true };
+    const newManualItem = { ...newItem, isManual: true, isCustom: true };
     manualTasksRef.current = [...manualTasksRef.current, newManualItem];
     localStorage.setItem('manualTasks', JSON.stringify(manualTasksRef.current));
     setItems(prev => [...prev, newManualItem]);
@@ -448,6 +472,7 @@ export default function App() {
             onToggleComplete={toggleItemComplete}
             onScheduleSave={handleScheduleSave}
             initialRawText={rawScheduleText}
+            onDelete={deleteCustomTask}
           />
         ) : isLoading ? (
           <>
@@ -475,6 +500,7 @@ export default function App() {
               key={item.id}
               item={item}
               onToggleComplete={toggleItemComplete}
+              onDelete={deleteCustomTask}
             />
           ))
         )}

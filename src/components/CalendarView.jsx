@@ -2,7 +2,7 @@ import { useState } from 'react';
 import AgendaItem from './AgendaItem';
 import { parseScheduleTSV } from '../utils/scheduleParser';
 
-export default function CalendarView({ items, widgetSize, onToggleComplete, onScheduleSave, initialRawText = '' }) {
+export default function CalendarView({ items, widgetSize, onToggleComplete, onScheduleSave, initialRawText = '', onDelete }) {
   // Calendar States
   const [currentMonth, setCurrentMonth] = useState(() => {
     const d = new Date();
@@ -339,7 +339,7 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
           {selectedTasks.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               {selectedTasks.map(item => (
-                <AgendaItem key={item.id} item={item} onToggleComplete={onToggleComplete} />
+                <AgendaItem key={item.id} item={item} onToggleComplete={onToggleComplete} onDelete={onDelete} />
               ))}
             </div>
           )}
