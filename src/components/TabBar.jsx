@@ -58,13 +58,14 @@ export default function TabBar({ activeTab, onTabChange, onClose }) {
   ];
 
   const activeIndex = tabs.findIndex(t => t.id === activeTab);
+  const isAiActive = activeTab === 'AI Chat';
 
   return (
     <div className="tabs" style={{ display: 'flex', alignItems: 'center', width: '100%', WebkitAppRegion: 'drag', boxSizing: 'border-box', justifyContent: 'space-between' }}>
       
       <div className="segment-container" style={{ WebkitAppRegion: 'no-drag' }}>
         <div 
-          className="gliding-pill" 
+          className={`gliding-pill ${isAiActive ? 'ai-active' : ''}`}
           style={{ transform: `translateX(calc(${activeIndex} * (var(--tab-btn-size) + var(--tab-btn-gap))))` }}
         />
         
@@ -73,7 +74,7 @@ export default function TabBar({ activeTab, onTabChange, onClose }) {
           return (
             <button 
               key={tab.id}
-              className={`segment-btn ${isActive ? 'active' : ''}`}
+              className={`segment-btn ${isActive ? 'active' : ''} ${isActive && tab.id === 'AI Chat' ? 'ai-active-btn' : ''}`}
               onClick={() => onTabChange(tab.id)}
               aria-label={tab.id}
               title={tab.id}
