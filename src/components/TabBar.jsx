@@ -62,9 +62,10 @@ export default function TabBar({ activeTab, onTabChange, onClose }) {
   return (
     <div className="tabs" style={{ display: 'flex', alignItems: 'center', width: '100%', WebkitAppRegion: 'drag', boxSizing: 'border-box', justifyContent: 'space-between' }}>
       
-      <div className="segment-container" style={{ WebkitAppRegion: 'no-drag', '--active-index': activeIndex }}>
+      <div className="segment-container" style={{ WebkitAppRegion: 'no-drag' }}>
         <div 
           className="gliding-pill" 
+          style={{ transform: `translateX(calc(${activeIndex} * (var(--tab-btn-size) + var(--tab-btn-gap))))` }}
         />
         
         {tabs.map(tab => {

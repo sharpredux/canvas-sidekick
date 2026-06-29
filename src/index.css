@@ -162,16 +162,29 @@ body {
   
 }
 
+@keyframes appleGradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
 .gliding-pill {
   position: absolute;
   top: 0;
   bottom: 0;
   width: var(--tab-btn-size); /* Responsive width */
-  background: var(--md-sys-color-primary-container); /* Saturated Neon Green */
+  background: linear-gradient(135deg, #007aff, #34c759, #00c7ba, #007aff);
+  background-size: 300% 300%;
+  animation: appleGradient 8s ease infinite;
   border-radius: calc(var(--tab-btn-size) / 2); /* Pill shape */
   transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);
   z-index: 0;
-  transform: translateX(calc(var(--active-index, 0) * (var(--tab-btn-size) + var(--tab-btn-gap))));
 }
 
 .segment-btn {
@@ -192,7 +205,7 @@ body {
 }
 
 .segment-btn.active {
-  color: #000000; /* Contrast against Cyan pill */
+  color: #ffffff; /* Contrast against animated gradient */
 }
 
 .content-area {
