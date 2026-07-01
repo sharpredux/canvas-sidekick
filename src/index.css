@@ -250,6 +250,18 @@ body {
   gap: 4px; /* Squeezed to compensate for lateral padding */
 }
 
+.agenda-item-card {
+  padding: 10px 12px;
+  border-radius: 14px;
+  gap: 4px;
+}
+
+.subject-pill {
+  padding: 6px 12px;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-label-small);
+}
+
 .time-col {
   min-width: 35px;
   display: flex;
@@ -414,8 +426,20 @@ body {
   --md-sys-typescale-body-small: 400 9px/12px var(--md-sys-typescale-font);
 }
 .app-container.compact-mode .content-area {
-  padding: 4px 8px 12px 8px;
+  padding: 2px 4px 12px 4px;
   justify-content: flex-start;
+}
+
+/* Smartwatch-style layout optimizations */
+.app-container.compact-mode .agenda-item-card {
+  padding: 6px 8px;
+  border-radius: 10px;
+  gap: 2px;
+}
+
+.app-container.compact-mode .subject-pill {
+  padding: 4px 8px;
+  font-size: 8px;
 }
 .app-container.compact-mode .fab {
   width: 32px;

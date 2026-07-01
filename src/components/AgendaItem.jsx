@@ -127,7 +127,7 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
     if (item.zoomLink) {
       return (
         <div 
-          className={`agenda-item watch-card ${isCompleted ? 'checked-state' : ''}`}
+          className={`agenda-item watch-card agenda-item-card ${isCompleted ? 'checked-state' : ''}`}
           onClick={handleClick}
           onDoubleClick={handleDoubleClick}
           onPointerDown={handlePointerDown}
@@ -137,11 +137,10 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
           style={{
             display: 'flex',
             alignItems: 'center',
+            alignItems: 'center',
             justifyContent: 'space-between',
             background: isCompleted ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container-high)',
             color: isCompleted ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)',
-            padding: '8px 12px', // Tighter padding
-            borderRadius: '14px',
             cursor: isDeadline ? 'pointer' : 'default',
             boxSizing: 'border-box',
             width: '100%',
@@ -176,7 +175,7 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
 
     return (
       <div 
-        className={`agenda-item watch-card ${isCompleted ? 'checked-state' : ''}`}
+        className={`agenda-item watch-card agenda-item-card ${isCompleted ? 'checked-state' : ''}`}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onPointerDown={handlePointerDown}
@@ -187,14 +186,12 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'stretch',
+          alignItems: 'stretch',
           background: isCompleted ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container-high)',
           color: isCompleted ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)',
-          padding: '10px 12px',
-          borderRadius: '14px',
           cursor: isDeadline ? 'pointer' : 'default',
           boxSizing: 'border-box',
           width: '100%',
-          gap: '4px',
           transform: isCustom ? `translateX(${isDragging ? dragOffset : (isRevealed ? -64 : 0)}px)` : undefined,
           transition: isCustom ? (isDragging ? 'none' : 'transform 0.2s ease') : undefined,
           touchAction: isCustom ? 'pan-y' : undefined,

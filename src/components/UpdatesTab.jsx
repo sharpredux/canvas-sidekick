@@ -65,14 +65,12 @@ export default function UpdatesTab({ items, widgetSize }) {
             return (
               <button
                 key={course}
+                className="subject-pill"
                 onClick={() => setActiveCourse(course)}
                 style={{
                   background: isActive ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container-high)',
                   color: isActive ? '#000000' : 'var(--md-sys-color-secondary)',
                   border: isActive ? 'none' : '1px solid var(--md-sys-color-outline-variant)',
-                  padding: '6px 12px',
-                  borderRadius: 'var(--md-sys-shape-corner-full)',
-                  font: 'var(--md-sys-typescale-label-small)',
                   fontWeight: isActive ? 700 : 400,
                   flexShrink: 0,
                   cursor: 'pointer',
