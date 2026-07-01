@@ -56,9 +56,7 @@ export default function UpdatesTab({ items, widgetSize }) {
       {courses.length > 1 && (
         <div 
           ref={scrollRef}
-          style={{
-            display: 'flex', gap: '6px', overflowX: 'auto', padding: '0px 0px 8px 0px', scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', flexShrink: 0
-          }}
+          className="updates-filters"
         >
           {courses.map(course => {
             const isActive = activeCourse === course;
@@ -87,17 +85,14 @@ export default function UpdatesTab({ items, widgetSize }) {
       )}
 
       {/* Announcements/Comments List */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div className="updates-list">
         {sortedItems.length === 0 ? (
-          <div style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center',
-            justifyContent: 'center', flex: 1, height: '100%', opacity: 0.5, gap: '8px'
-          }}>
+          <div className="updates-empty">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10"></circle>
               <path d="M8 12h8"></path>
             </svg>
-            <span style={{ font: 'var(--md-sys-typescale-body-medium)', color: 'var(--md-sys-color-on-surface)' }}>
+            <span className="updates-empty-text">
               No updates for {activeCourse}.
             </span>
           </div>

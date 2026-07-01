@@ -137,7 +137,6 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
           style={{
             display: 'flex',
             alignItems: 'center',
-            alignItems: 'center',
             justifyContent: 'space-between',
             background: isCompleted ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container-high)',
             color: isCompleted ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)',
@@ -151,10 +150,9 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
             zIndex: isCustom ? 2 : undefined,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div className="zoom-item-header">
             <ZoomJoinButton link={item.zoomLink} />
-            <span style={{ 
-              font: 'var(--md-sys-typescale-title-small)', 
+            <span className="zoom-item-course" style={{ 
               color: isCompleted ? 'inherit' : '#FFFFFF',
               textDecoration: isCompleted ? 'line-through' : 'none',
               opacity: isCompleted ? 0.7 : 1
@@ -162,10 +160,8 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
               {formatCourseCode(item.course)}
             </span>
           </div>
-          <span style={{ 
-            font: 'var(--md-sys-typescale-label-small)', 
-            color: isCompleted ? 'inherit' : (urgent ? 'var(--md-sys-color-error)' : 'var(--md-sys-color-primary)'),
-            fontWeight: 600
+          <span className="item-time-text" style={{ 
+            color: isCompleted ? 'inherit' : (urgent ? 'var(--md-sys-color-error)' : 'var(--md-sys-color-primary)')
           }}>
             {getPrimaryTimeLabel(targetDate)}
           </span>
@@ -186,7 +182,6 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'stretch',
-          alignItems: 'stretch',
           background: isCompleted ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container-high)',
           color: isCompleted ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)',
           cursor: isDeadline ? 'pointer' : 'default',
@@ -206,11 +201,9 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
           </span>
           
           {(isDeadline || item.type === 'announcement' || item.type === 'comment') && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', marginLeft: '8px' }}>
-              <span style={{ 
-                font: 'var(--md-sys-typescale-label-small)', 
-                color: isCompleted ? 'inherit' : (urgent ? 'var(--md-sys-color-error)' : (isDeadline ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)')),
-                fontWeight: 600
+            <div className="item-time-wrapper">
+              <span className="item-time-text" style={{ 
+                color: isCompleted ? 'inherit' : (urgent ? 'var(--md-sys-color-error)' : (isDeadline ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)'))
               }}>
                 {isDeadline ? getPrimaryTimeLabel(targetDate) : getPastTimeLabel(targetDate)}
               </span>
@@ -220,8 +213,6 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
 
         {/* Main Title */}
         <h3 className="item-title" style={{ 
-          font: 'var(--md-sys-typescale-title-small)', 
-          margin: '2px 0',
           textDecoration: isCompleted ? 'line-through' : 'none',
           opacity: isCompleted ? 0.7 : 1
         }}>
@@ -230,11 +221,9 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
 
         {/* Bottom Complications Row (Estimates) */}
         {isDeadline && item.timeEstimate ? (
-          <div style={{ display: 'flex', gap: '8px', marginTop: '4px', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-             <span style={{ 
-               font: 'var(--md-sys-typescale-label-small)',
+          <div className="item-estimate" onClick={e => e.stopPropagation()}>
+             <span className="item-estimate-text" style={{ 
                color: isCompleted ? 'inherit' : 'var(--md-sys-color-on-surface-variant)',
-               display: 'flex', alignItems: 'center', gap: '4px',
                opacity: isCompleted ? 0.8 : 1
              }}>
                <svg width="12" height="12" viewBox="0 -960 960 960" fill="currentColor">
@@ -249,15 +238,13 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
         {(item.type === 'announcement' || item.type === 'comment') && (
           <>
             {item.preview && (
-              <p className="item-preview" style={{ margin: 0, marginTop: '4px', font: 'var(--md-sys-typescale-body-small)' }}>
+              <p className="item-preview">
                 {item.preview}
               </p>
             )}
             {item.author && (
               <div className="item-author" style={{ 
-                font: 'var(--md-sys-typescale-label-small)', 
                 color: 'var(--md-sys-color-primary)', 
-                marginTop: '4px',
                 opacity: 0.8 
               }}>
                 By: {item.author}
@@ -301,18 +288,7 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
             boxSizing: 'border-box',
           }}
         >
-          <div style={{
-            width: '44px',
-            height: 'calc(100% - 8px)',
-            background: '#ff3b30',
-            borderRadius: '12px',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            boxShadow: '0 2px 8px rgba(255, 59, 48, 0.3)',
-            transition: 'transform 0.1s ease',
-            marginRight: '6px'
-          }}>
+          <div className="item-action-btn">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
