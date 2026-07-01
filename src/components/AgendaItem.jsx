@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { getPrimaryTimeLabel, isDeadlineUrgent } from '../utils/dateFormatter';
+import { getPrimaryTimeLabel, getPastTimeLabel, isDeadlineUrgent } from '../utils/dateFormatter';
 import ZoomJoinButton from './ZoomJoinButton';
 
 export default function AgendaItem({ item, onToggleComplete, onDelete }) {
@@ -215,7 +215,7 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
                 color: isCompleted ? 'inherit' : (urgent ? 'var(--md-sys-color-error)' : (isDeadline ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)')),
                 fontWeight: 600
               }}>
-                {getPrimaryTimeLabel(targetDate)}
+                {isDeadline ? getPrimaryTimeLabel(targetDate) : getPastTimeLabel(targetDate)}
               </span>
             </div>
           )}

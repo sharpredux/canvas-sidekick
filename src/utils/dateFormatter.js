@@ -27,3 +27,13 @@ export const isDeadlineUrgent = (dateString) => {
   // Urgent if due in less than 24 hours and not in the past
   return diff > 0 && diff < (1000 * 60 * 60 * 24);
 };
+
+export const getPastTimeLabel = (dateString) => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const isToday = date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+  if (isToday) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+};
