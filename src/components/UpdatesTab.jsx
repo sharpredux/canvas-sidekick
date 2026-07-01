@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import AgendaItem from './AgendaItem';
 
 export default function UpdatesTab({ items, widgetSize }) {
@@ -34,15 +34,32 @@ export default function UpdatesTab({ items, widgetSize }) {
     );
   }, [items, activeCourse]);
 
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      if (e.deltaY === 0) return;
+      e.preventDefault();
+      el.scrollBy({ left: e.deltaY < 0 ? -40 : 40 });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
   return (
     <div style={{
       width: '100%', height: '100%', display: 'flex', flexDirection: 'column', boxSizing: 'border-box'
     }}>
       {/* Subject Filter Pills */}
       {courses.length > 1 && (
-        <div style={{
-          display: 'flex', gap: '6px', overflowX: 'auto', padding: '8px 16px', scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', flexShrink: 0
-        }}>
+        <div 
+          ref={scrollRef}
+          style={{
+            display: 'flex', gap: '6px', overflowX: 'auto', padding: '0px 0px 8px 0px', scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', flexShrink: 0
+          }}
+        >
           {courses.map(course => {
             const isActive = activeCourse === course;
             return (
@@ -66,11 +83,13 @@ export default function UpdatesTab({ items, widgetSize }) {
               </button>
             )
           })}
+          {/* Spacer to maintain right margin when scrolling */}
+          <div style={{ width: '1px', flexShrink: 0 }}></div>
         </div>
       )}
 
       {/* Announcements/Comments List */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px 16px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {sortedItems.length === 0 ? (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',

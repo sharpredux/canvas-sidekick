@@ -208,11 +208,11 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
             {formatCourseCode(item.course)}
           </span>
           
-          {isDeadline && (
+          {(isDeadline || item.type === 'announcement' || item.type === 'comment') && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', marginLeft: '8px' }}>
               <span style={{ 
                 font: 'var(--md-sys-typescale-label-small)', 
-                color: isCompleted ? 'inherit' : (urgent ? 'var(--md-sys-color-error)' : 'var(--md-sys-color-primary)'),
+                color: isCompleted ? 'inherit' : (urgent ? 'var(--md-sys-color-error)' : (isDeadline ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)')),
                 fontWeight: 600
               }}>
                 {getPrimaryTimeLabel(targetDate)}
