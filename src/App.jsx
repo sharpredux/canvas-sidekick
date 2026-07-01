@@ -9,6 +9,7 @@ import AuthModal from './components/AuthModal';
 import ScheduleSettings from './components/ScheduleSettings';
 import SkeletonAgendaItem from './components/SkeletonAgendaItem';
 import AIChatTab from './components/AIChatTab';
+import UpdatesTab from './components/UpdatesTab';
 import { parseScheduleTSV } from './utils/scheduleParser';
 
 const MOCK_ITEMS = [
@@ -385,12 +386,6 @@ export default function App() {
       });
     }
 
-    if (activeTab === 'Updates') {
-      return filtered.sort((a, b) =>
-        new Date(b.dueDate || b.date) - new Date(a.dueDate || a.date)
-      );
-    }
-
     return filtered.sort((a, b) =>
       new Date(a.dueDate || a.date) - new Date(b.dueDate || b.date)
     );
@@ -474,6 +469,8 @@ export default function App() {
             initialRawText={rawScheduleText}
             onDelete={deleteCustomTask}
           />
+        ) : activeTab === 'Updates' ? (
+          <UpdatesTab items={filteredItems} widgetSize={widgetSize} />
         ) : isLoading ? (
           <>
             <SkeletonAgendaItem />

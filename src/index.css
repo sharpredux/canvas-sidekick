@@ -76,6 +76,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  isolation: isolate;
   box-sizing: border-box;
 }
 
@@ -146,6 +147,8 @@ body {
   flex-direction: column;
   background: #000000;
   border-bottom: none;
+  border-top-left-radius: var(--md-sys-shape-corner-extra-large);
+  border-top-right-radius: var(--md-sys-shape-corner-extra-large);
 }
 
 .tabs {

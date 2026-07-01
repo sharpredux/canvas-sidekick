@@ -1,0 +1,98 @@
+import { useState, useMemo } from 'react';
+import AgendaItem from './AgendaItem';
+
+export default function UpdatesTab({ items, widgetSize }) {
+  const [activeCourse, setActiveCourse] = useState('All');
+
+  // Extract unique subjects from the items
+  const courses = useMemo(() => {
+    const courseSet = new Set();
+    items.forEach(item => {
+      if (item.course) {
+        // Use the short name (e.g., "ITNET04_S24C" instead of full string)
+        const shortName = item.course.split(' - ')[0];
+        courseSet.add(shortName);
+      }
+    });
+    return ['All', ...Array.from(courseSet).sort()];
+  }, [items]);
+
+  const sortedItems = useMemo(() => {
+    let filtered = items;
+    
+    // Filter by subject if not "All"
+    if (activeCourse !== 'All') {
+      filtered = filtered.filter(item => {
+        if (!item.course) return false;
+        return item.course.startsWith(activeCourse);
+      });
+    }
+    
+    // Sort chronologically (oldest to newest) based on the user's explicit request
+    return filtered.sort((a, b) => 
+      new Date(a.date || a.dueDate) - new Date(b.date || b.dueDate)
+    );
+  }, [items, activeCourse]);
+
+  return (
+    <div style={{
+      width: '100%', height: '100%', display: 'flex', flexDirection: 'column', boxSizing: 'border-box'
+    }}>
+      {/* Subject Filter Pills */}
+      {courses.length > 1 && (
+        <div style={{
+          display: 'flex', gap: '6px', overflowX: 'auto', padding: '8px 16px', scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', flexShrink: 0
+        }}>
+          {courses.map(course => {
+            const isActive = activeCourse === course;
+            return (
+              <button
+                key={course}
+                onClick={() => setActiveCourse(course)}
+                style={{
+                  background: isActive ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container-high)',
+                  color: isActive ? '#000000' : 'var(--md-sys-color-secondary)',
+                  border: isActive ? 'none' : '1px solid var(--md-sys-color-outline-variant)',
+                  padding: '6px 12px',
+                  borderRadius: 'var(--md-sys-shape-corner-full)',
+                  font: 'var(--md-sys-typescale-label-small)',
+                  fontWeight: isActive ? 700 : 400,
+                  flexShrink: 0,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                {course}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Announcements/Comments List */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px 16px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {sortedItems.length === 0 ? (
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', flex: 1, height: '100%', opacity: 0.5, gap: '8px'
+          }}>
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M8 12h8"></path>
+            </svg>
+            <span style={{ font: 'var(--md-sys-typescale-body-medium)', color: 'var(--md-sys-color-on-surface)' }}>
+              No updates for {activeCourse}.
+            </span>
+          </div>
+        ) : (
+          (widgetSize === 'Small' ? sortedItems.slice(0, 1) : sortedItems).map(item => (
+            <AgendaItem
+              key={item.id}
+              item={item}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
