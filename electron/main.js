@@ -379,6 +379,7 @@ function startPolling(schoolUrl, webContents) {
     }
     try {
       const data = await fetchCanvasDataInternal(schoolUrl);
+      webContents.send('canvas-fetch-occurred', Date.now());
       const hash = JSON.stringify(data);
       if (hash !== lastDataHash) {
         lastDataHash = hash;
@@ -593,7 +594,9 @@ function registerIpcAndSessionHandlers() {
   // One-shot fetch (initial load + manual refresh)
   ipcMain.handle('fetch-canvas-data', async (_event, schoolUrl) => {
     try {
-      return await fetchCanvasDataInternal(schoolUrl);
+      const data = await fetchCanvasDataInternal(schoolUrl);
+      _event.sender.send('canvas-fetch-occurred', Date.now());
+      return data;
     } catch (err) {
       console.error('fetch-canvas-data failed:', err);
       if (err.message === 'no_cookie' || err.message === 'decrypt_failed' || err.message === 'unauthorized') {

@@ -54,6 +54,7 @@ export default function App() {
   const [rawScheduleText, setRawScheduleText] = useState('');
   const [isLoading, setIsLoading]           = useState(false);
   const [widgetSize, setWidgetSize]         = useState('Medium');
+  const [lastRefreshTime, setLastRefreshTime] = useState(null);
 
   // ── localStorage caches — read once, write-through ────────────────────────
   const completedIdsRef = useRef(
@@ -287,6 +288,16 @@ export default function App() {
     };
   }, [isAuthenticated, schoolUrl, mergeItems]);
 
+  useEffect(() => {
+    if (!window.api?.onCanvasFetchOccurred) return;
+    const unsubscribe = window.api.onCanvasFetchOccurred((timestamp) => {
+      setLastRefreshTime(timestamp);
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, []);
+
   // ── Completion toggle ──────────────────────────────────────────────────────
   const toggleItemComplete = useCallback((id) => {
     setItems(prevItems => {
@@ -355,11 +366,19 @@ export default function App() {
     today.setHours(0, 0, 0, 0);
 
     let filtered = items.filter(item => {
-      // Hide completed tasks from previous days EXCEPT in Calendar view
+      const itemDate = new Date(item.dueDate || item.date);
+      const now = new Date();
+
+      // Hide completed tasks if their exact deadline has passed EXCEPT in Calendar view
       if (item.completed && activeTab !== 'Calendar') {
-        const itemDate = new Date(item.dueDate || item.date);
+        if (itemDate <= now) return false;
+      }
+      
+      // Hide event/meeting links from previous days EXCEPT in Calendar view
+      if (item.type === 'event' && activeTab !== 'Calendar') {
         if (itemDate < today) return false;
       }
+
       if (activeTab === 'Tasks')   return item.type === 'deadline';
       if (activeTab === 'Updates') return item.type === 'announcement' || item.type === 'comment';
       return item.type === 'deadline' || item.type === 'event';
@@ -451,6 +470,7 @@ export default function App() {
             onManualRefresh={forceRefreshCanvas}
             currentSize={widgetSize}
             onSizeChange={handleSizeChange}
+            lastRefreshTime={lastRefreshTime}
           />
         ) : activeTab === 'AI Chat' ? (
           <AIChatTab 

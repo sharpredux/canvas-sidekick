@@ -1,8 +1,23 @@
 import { useState, useEffect } from 'react';
 
-export default function ScheduleSettings({ onManualRefresh, currentSize, onSizeChange }) {
+export default function ScheduleSettings({ onManualRefresh, currentSize, onSizeChange, lastRefreshTime }) {
   const [refreshing, setRefreshing] = useState(false);
   const [launchOnStartup, setLaunchOnStartup] = useState(false);
+  const [minutesAgo, setMinutesAgo] = useState(null);
+
+  useEffect(() => {
+    if (!lastRefreshTime) {
+      setMinutesAgo(null);
+      return;
+    }
+    const update = () => {
+      const diff = Math.floor((Date.now() - lastRefreshTime) / 60000);
+      setMinutesAgo(diff);
+    };
+    update();
+    const id = setInterval(update, 30000); // Check every 30s
+    return () => clearInterval(id);
+  }, [lastRefreshTime]);
 
   useEffect(() => {
     async function fetchStartup() {
@@ -116,7 +131,7 @@ export default function ScheduleSettings({ onManualRefresh, currentSize, onSizeC
             {refreshing ? 'Syncing...' : 'Force Sync'}
           </button>
           <span style={{ font: 'var(--md-sys-typescale-body-small)', color: 'var(--md-sys-color-on-surface-variant)' }}>
-            v0.0.0
+            {minutesAgo !== null ? (minutesAgo === 0 ? 'Just now' : `${minutesAgo}m ago`) : 'v0.0.0'}
           </span>
         </div>
       </div>

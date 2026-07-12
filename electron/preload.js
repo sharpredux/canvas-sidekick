@@ -12,6 +12,11 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('canvas-data-update', listener);
     return () => ipcRenderer.removeListener('canvas-data-update', listener);
   },
+  onCanvasFetchOccurred: (cb) => {
+    const listener = (event, timestamp) => cb(timestamp);
+    ipcRenderer.on('canvas-fetch-occurred', listener);
+    return () => ipcRenderer.removeListener('canvas-fetch-occurred', listener);
+  },
   saveSettings: (settings) => ipcRenderer.send('save-settings', settings),
   loadSettings: () => ipcRenderer.invoke('load-settings'),
   hasSession: () => ipcRenderer.invoke('has-session'),
