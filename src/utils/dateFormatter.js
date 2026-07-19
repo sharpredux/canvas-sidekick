@@ -1,10 +1,10 @@
-export const getPrimaryTimeLabel = (dateString) => {
+export const getPrimaryTimeLabel = (dateString, isCompleted = false, isDeadline = true) => {
   const date = new Date(dateString);
   const now = new Date();
   const diff = date - now;
   const hours = Math.floor(diff / (1000 * 60 * 60));
   
-  if (diff < 0) return 'Past';
+  if (diff < 0) return (isCompleted || !isDeadline) ? 'Past' : 'Missing';
   if (hours < 24) return `${hours}h`;
   return `${date.getMonth() + 1}/${date.getDate()}`;
 };

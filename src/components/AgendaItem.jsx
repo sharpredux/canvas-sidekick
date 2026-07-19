@@ -161,9 +161,12 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
             </span>
           </div>
           <span className="item-time-text" style={{ 
-            color: isCompleted ? 'inherit' : (urgent ? 'var(--md-sys-color-error)' : 'var(--md-sys-color-primary)')
+            color: isCompleted ? 'inherit' : (urgent ? 'var(--md-sys-color-error)' : 'var(--md-sys-color-primary)'),
+            ...(getPrimaryTimeLabel(targetDate, isCompleted, isDeadline) === 'Missing' && !isCompleted ? {
+                  color: 'var(--md-sys-color-error)'
+            } : {})
           }}>
-            {getPrimaryTimeLabel(targetDate)}
+            {getPrimaryTimeLabel(targetDate, isCompleted, isDeadline)}
           </span>
         </div>
       );
@@ -203,9 +206,12 @@ export default function AgendaItem({ item, onToggleComplete, onDelete }) {
           {(isDeadline || item.type === 'announcement' || item.type === 'comment') && (
             <div className="item-time-wrapper">
               <span className="item-time-text" style={{ 
-                color: isCompleted ? 'inherit' : (urgent ? 'var(--md-sys-color-error)' : (isDeadline ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)'))
+                color: isCompleted ? 'inherit' : (urgent ? 'var(--md-sys-color-error)' : (isDeadline ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)')),
+                ...(isDeadline && getPrimaryTimeLabel(targetDate, isCompleted, isDeadline) === 'Missing' && !isCompleted ? {
+                  color: 'var(--md-sys-color-error)'
+                } : {})
               }}>
-                {isDeadline ? getPrimaryTimeLabel(targetDate) : getPastTimeLabel(targetDate)}
+                {isDeadline ? getPrimaryTimeLabel(targetDate, isCompleted, isDeadline) : getPastTimeLabel(targetDate)}
               </span>
             </div>
           )}

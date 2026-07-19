@@ -192,26 +192,36 @@ async function fetchCanvasDataInternal(schoolUrl) {
   if (!res.ok) return [];
   const eventsData = await res.json();
 
-  // 2. Fetch todo list — the source of truth for what still needs submission
-  const todoRes = await net.fetch(`${schoolUrl}/api/v1/users/self/todo`, {
-    headers,
-    credentials: 'include'
+  // Group assignment IDs by course for batch submission fetching
+  const courseAssignments = {};
+  eventsData.forEach(event => {
+    if (event.assignment && event.context_code && event.context_code.startsWith('course_')) {
+      const courseId = event.context_code.split('_')[1];
+      if (!courseAssignments[courseId]) courseAssignments[courseId] = [];
+      courseAssignments[courseId].push(event.assignment.id);
+    }
   });
-  const pendingAssignmentIds = new Set();
 
-  if (todoRes.ok) {
-    const todoData = await todoRes.json();
-    if (Array.isArray(todoData)) {
-      todoData.forEach(item => {
-        if (item.assignment?.id) {
-          pendingAssignmentIds.add(item.assignment.id.toString());
-        } else if (item.quiz?.id) {
-          pendingAssignmentIds.add(item.quiz.id.toString());
-        } else if (item.ignore) {
-          const match = item.ignore.match(/assignment_(\d+)/);
-          if (match) pendingAssignmentIds.add(match[1]);
-        }
+  const submissionsMap = {}; // mapping of assignment_id -> workflow_state
+  
+  for (const [courseId, assignmentIds] of Object.entries(courseAssignments)) {
+    // Canvas allows querying multiple assignment submissions at once
+    const query = assignmentIds.map(id => `assignment_ids[]=${id}`).join('&');
+    try {
+      const subRes = await net.fetch(`${schoolUrl}/api/v1/courses/${courseId}/students/submissions?student_ids[]=self&${query}`, {
+        headers,
+        credentials: 'include'
       });
+      if (subRes.ok) {
+        const subData = await subRes.json();
+        if (Array.isArray(subData)) {
+          subData.forEach(sub => {
+            submissionsMap[sub.assignment_id.toString()] = sub.workflow_state;
+          });
+        }
+      }
+    } catch (err) {
+      console.error(`[fetch] Failed to fetch submissions for course ${courseId}:`, err);
     }
   }
 
@@ -225,10 +235,17 @@ async function fetchCanvasDataInternal(schoolUrl) {
 
     let isCompleted = false;
     if (event.assignment) {
-      const sTypes = event.assignment.submission_types || [];
-      const requiresSubmission = sTypes.length > 0 && !sTypes.includes('none') && !sTypes.includes('not_graded');
-      if (requiresSubmission) {
-        isCompleted = !pendingAssignmentIds.has(event.assignment.id.toString());
+      // 1. Check if the assignment submission API explicitly says it's submitted/graded
+      const state = submissionsMap[event.assignment.id.toString()];
+      if (state === 'submitted' || state === 'graded' || state === 'pending_review') {
+        isCompleted = true;
+      }
+      // 2. Fallback in case upcoming_events embedded it anyway
+      else if (event.assignment.submission && event.assignment.submission.workflow_state) {
+        const embeddedState = event.assignment.submission.workflow_state;
+        if (embeddedState === 'submitted' || embeddedState === 'graded' || embeddedState === 'pending_review') {
+          isCompleted = true;
+        }
       }
     }
 
@@ -379,6 +396,38 @@ function startPolling(schoolUrl, webContents) {
     }
     try {
       const data = await fetchCanvasDataInternal(schoolUrl);
+      
+      // --- LOCAL ARCHIVE LOGIC ---
+      try {
+        const archiveDir = path.join(app.getPath('userData'), 'archive');
+        if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
+        const completedTasks = data.filter(e => e.completed && e.type === 'deadline');
+        if (completedTasks.length > 0) {
+          const tasksByDate = {};
+          completedTasks.forEach(task => {
+            if (!task.dueDate) return;
+            const dateStr = new Date(task.dueDate).toISOString().split('T')[0];
+            if (!tasksByDate[dateStr]) tasksByDate[dateStr] = [];
+            tasksByDate[dateStr].push(task);
+          });
+          Object.keys(tasksByDate).forEach(dateStr => {
+            const filePath = path.join(archiveDir, `${dateStr}.json`);
+            let existing = [];
+            if (fs.existsSync(filePath)) {
+              try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch(e) {}
+            }
+            const existingIds = new Set(existing.map(t => t.id));
+            const newTasks = tasksByDate[dateStr].filter(t => !existingIds.has(t.id));
+            if (newTasks.length > 0) {
+              fs.writeFileSync(filePath, JSON.stringify([...existing, ...newTasks], null, 2));
+            }
+          });
+        }
+      } catch (archErr) {
+        console.error('[archive] Error saving archive:', archErr);
+      }
+      // --- END LOCAL ARCHIVE LOGIC ---
+
       webContents.send('canvas-fetch-occurred', Date.now());
       const hash = JSON.stringify(data);
       if (hash !== lastDataHash) {
@@ -516,6 +565,14 @@ function registerIpcAndSessionHandlers() {
   ipcMain.handle('load-settings', () => {
     try { if (fs.existsSync(settingsPath)) return JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch (e) { console.error(e); }
     return { size: 'Medium' };
+  });
+
+  ipcMain.handle('get-archived-tasks', async (event, dateStr) => {
+    const filePath = path.join(app.getPath('userData'), 'archive', `${dateStr}.json`);
+    if (fs.existsSync(filePath)) {
+      try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch(e) { return []; }
+    }
+    return [];
   });
 
   ipcMain.handle('has-session', () => {

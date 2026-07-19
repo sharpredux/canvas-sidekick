@@ -7,16 +7,19 @@ export default function ScheduleSettings({ onManualRefresh, currentSize, onSizeC
 
   useEffect(() => {
     if (!lastRefreshTime) {
-      setMinutesAgo(null);
-      return;
+      const tId = setTimeout(() => setMinutesAgo(null), 0);
+      return () => clearTimeout(tId);
     }
     const update = () => {
       const diff = Math.floor((Date.now() - lastRefreshTime) / 60000);
-      setMinutesAgo(diff);
+      setMinutesAgo(diff < 0 ? 0 : diff);
     };
-    update();
+    const tId = setTimeout(update, 0);
     const id = setInterval(update, 30000); // Check every 30s
-    return () => clearInterval(id);
+    return () => {
+      clearTimeout(tId);
+      clearInterval(id);
+    };
   }, [lastRefreshTime]);
 
   useEffect(() => {

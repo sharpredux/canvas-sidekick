@@ -32,5 +32,6 @@ contextBridge.exposeInMainWorld('api', {
   resizeWindow: (sizeName) => ipcRenderer.send('resize-window', sizeName),
   llmChat: (messages) => ipcRenderer.invoke('llm-chat', messages),
   llmParseCommand: (userInput) => ipcRenderer.invoke('llm-parse-command', userInput),
-  llmEstimateTask: (taskTitle, deadline) => ipcRenderer.invoke('llm-estimate-task', taskTitle, deadline)
+  llmEstimateTask: (taskTitle, deadline) => ipcRenderer.invoke('llm-estimate-task', taskTitle, deadline),
+  getArchivedTasks: (dateStr) => ipcRenderer.invoke('get-archived-tasks', dateStr)
 });

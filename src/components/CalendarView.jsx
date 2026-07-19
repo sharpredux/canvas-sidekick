@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import AgendaItem from './AgendaItem';
 import { parseScheduleTSV } from '../utils/scheduleParser';
 
@@ -13,6 +13,19 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
   
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'day'
   const [selectedDate, setSelectedDate] = useState(null);
+  const [archivedTasks, setArchivedTasks] = useState([]);
+
+  useEffect(() => {
+    if (selectedDate && window.api?.getArchivedTasks) {
+      const d = new Date(selectedDate);
+      const dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      window.api.getArchivedTasks(dateStr).then(tasks => {
+        setArchivedTasks(tasks || []);
+      }).catch(() => setArchivedTasks([]));
+    } else {
+      setArchivedTasks([]);
+    }
+  }, [selectedDate]);
 
   // Import States
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -234,7 +247,7 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
     );
   }
 
-  const deadlines = items.filter(item => item.type === 'deadline');
+  const deadlines = items.filter(item => item.type === 'deadline' || item.type === 'event');
 
   const changeMonth = (offset) => {
     const newMonth = new Date(currentMonth);
@@ -267,10 +280,17 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
 
   const renderDayDetails = (dateMs, inline = false) => {
     const selectedTasks = deadlines.filter(item => {
-      const itemDate = new Date(item.dueDate);
+      const itemDate = new Date(item.dueDate || item.date);
       itemDate.setHours(0,0,0,0);
       return itemDate.getTime() === dateMs;
-    }).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+    }).sort((a, b) => new Date(a.dueDate || a.date) - new Date(b.dueDate || b.date));
+
+    const mergedTasks = [...selectedTasks];
+    const existingIds = new Set(selectedTasks.map(t => t.id));
+    archivedTasks.forEach(t => {
+      if (!existingIds.has(t.id)) mergedTasks.push(t);
+    });
+    mergedTasks.sort((a, b) => new Date(a.dueDate || a.date) - new Date(b.dueDate || b.date));
 
     const clickedDateObj = new Date(dateMs);
     const dayOfWeekName = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][clickedDateObj.getDay()];
@@ -336,15 +356,15 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
             </div>
           )}
           
-          {selectedTasks.length > 0 && (
+          {mergedTasks.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {selectedTasks.map(item => (
+              {mergedTasks.map(item => (
                 <AgendaItem key={item.id} item={item} onToggleComplete={onToggleComplete} onDelete={onDelete} />
               ))}
             </div>
           )}
 
-          {dayClasses.length === 0 && selectedTasks.length === 0 && (
+          {dayClasses.length === 0 && mergedTasks.length === 0 && (
             <div style={{ color: 'var(--md-sys-color-on-surface-variant)', font: 'var(--md-sys-typescale-body-small)', textAlign: 'center', marginTop: '20px' }}>
               No tasks or classes.
             </div>
@@ -394,7 +414,7 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
           const dDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), dayNum);
           
           const tasksOnDay = deadlines.filter(item => {
-            const itemDate = new Date(item.dueDate);
+            const itemDate = new Date(item.dueDate || item.date);
             itemDate.setHours(0,0,0,0);
             return itemDate.getTime() === dDate.getTime();
           });

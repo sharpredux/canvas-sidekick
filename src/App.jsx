@@ -78,7 +78,7 @@ export default function App() {
           persistedMap.set(item.id, { 
             ...item, 
             timeEstimate: item.timeEstimate || existing.timeEstimate,
-            completed: completedIdsRef.current.has(item.id) || existing.completed 
+            completed: completedIdsRef.current.has(item.id) || !!item.completed 
           });
         } else {
           persistedMap.set(item.id, {
@@ -362,6 +362,8 @@ export default function App() {
 
   // ── Filtered + sorted items — only recomputes when inputs change ──────────
   const filteredItems = useMemo(() => {
+    // Force re-evaluation on refresh/sync tick boundary
+    void lastRefreshTime;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -371,7 +373,7 @@ export default function App() {
 
       // Hide completed tasks if their exact deadline has passed EXCEPT in Calendar view
       if (item.completed && activeTab !== 'Calendar') {
-        if (itemDate <= now) return false;
+        if (itemDate < today) return false;
       }
       
       // Hide event/meeting links from previous days EXCEPT in Calendar view
@@ -408,7 +410,7 @@ export default function App() {
     return filtered.sort((a, b) =>
       new Date(a.dueDate || a.date) - new Date(b.dueDate || b.date)
     );
-  }, [items, activeTab, scheduleCourses]);
+  }, [items, activeTab, scheduleCourses, lastRefreshTime]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   if (isCheckingAuth) {
