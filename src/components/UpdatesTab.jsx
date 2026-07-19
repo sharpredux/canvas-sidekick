@@ -28,9 +28,9 @@ export default function UpdatesTab({ items, widgetSize }) {
       });
     }
     
-    // Sort chronologically (oldest to newest) based on the user's explicit request
+    // Sort reverse chronologically (newest to oldest)
     return filtered.sort((a, b) => 
-      new Date(a.date || a.dueDate) - new Date(b.date || b.dueDate)
+      new Date(b.date || b.dueDate) - new Date(a.date || a.dueDate)
     );
   }, [items, activeCourse]);
 
