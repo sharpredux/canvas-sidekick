@@ -45,10 +45,31 @@ const net = {
                 type: "assignment",
                 context_code: "course_101",
                 assignment: { id: 12, submission_types: ["none"] } // Should be completed automatically
+              },
+              {
+                id: 5,
+                title: "Group Assignment",
+                type: "assignment",
+                context_code: "course_101",
+                assignment: { id: 13, submission_types: ["online_upload"] }
+              },
+              {
+                id: 6,
+                title: "Excused Assignment",
+                type: "assignment",
+                context_code: "course_101",
+                assignment: { id: 14, submission_types: ["online_upload"] }
+              },
+              {
+                id: 7,
+                title: "Third-party Quiz",
+                type: "assignment",
+                context_code: "course_101",
+                assignment: { id: 15, submission_types: ["external_tool"] }
               }
             ];
-            // Add 19 more to course_101 to push the total for course_101 to 22 (testing > 20 batching)
-            for (let i = 13; i <= 31; i++) {
+            // Add 16 more to course_101 to push the total for course_101 to 22 (testing > 20 batching)
+            for (let i = 16; i <= 31; i++) {
               page1.push({
                 id: i * 10,
                 title: `Batch Assignment ${i}`,
@@ -90,6 +111,12 @@ const net = {
           return { assignment_id: 11, workflow_state: 'unsubmitted', score: 95 }; // Graded external tool
         } else if (id === '40') {
           return { assignment_id: 40, workflow_state: 'unsubmitted', score: null }; // Ungraded external tool
+        } else if (id === '13') {
+          return { assignment_id: 13, workflow_state: 'unsubmitted', submitted_at: '2026-07-21T00:00:00Z' }; // Group assignment
+        } else if (id === '14') {
+          return { assignment_id: 14, workflow_state: 'unsubmitted', excused: true }; // Excused
+        } else if (id === '15') {
+          return { assignment_id: 15, workflow_state: 'unsubmitted', score: 80 }; // Third-party Quiz
         } else {
           return { assignment_id: parseInt(id), workflow_state: 'unsubmitted' };
         }
@@ -221,20 +248,42 @@ async function testLogic() {
 
     let isCompleted = false;
     if (event.assignment) {
-      // 1. Check if the assignment submission API explicitly says it's submitted/graded
-      const state = submissionsMap[event.assignment.id.toString()];
-      if (state === 'submitted' || state === 'graded' || state === 'pending_review') {
+      const sub = submissionsScoreMap[event.assignment.id.toString()];
+
+      // 1. Explicit Workflow States
+      if (sub && (sub.workflow_state === 'submitted' || sub.workflow_state === 'graded' || sub.workflow_state === 'pending_review')) {
         isCompleted = true;
       }
-      // 2. Fallback in case upcoming_events embedded it anyway
-      else if (event.assignment.submission && event.assignment.submission.workflow_state) {
+      
+      // 2. The Excused Flag
+      if (!isCompleted && sub && sub.excused === true) {
+        isCompleted = true;
+      }
+
+      // 3. The Submitted_At Timestamp (Catches Group Assignments)
+      if (!isCompleted && sub && sub.submitted_at) {
+        isCompleted = true;
+      }
+
+      // 4. The Graded Flag / Score Presence
+      if (!isCompleted && sub && sub.score !== null && sub.score !== undefined) {
+        isCompleted = true;
+      }
+
+      // 5. Assignment-Level Submission Flag
+      if (!isCompleted && event.assignment.has_submitted_submissions === true) {
+        isCompleted = true;
+      }
+
+      // 6. Fallback in case upcoming_events embedded it anyway
+      if (!isCompleted && event.assignment.submission && event.assignment.submission.workflow_state) {
         const embeddedState = event.assignment.submission.workflow_state;
         if (embeddedState === 'submitted' || embeddedState === 'graded' || embeddedState === 'pending_review') {
           isCompleted = true;
         }
       }
       
-      // 3. Edge Case: Assignments that do not require online submissions
+      // 7. Edge Case: Assignments that do not require online submissions
       // Prevent "Missing" false positives for assignments the user literally cannot submit online
       if (!isCompleted && event.assignment.submission_types) {
         const sTypes = event.assignment.submission_types;
@@ -299,6 +348,11 @@ async function testLogic() {
   assert(results["External Tool Assignment (Graded)"] === true, "External Tool marked complete via score check");
   assert(results["No Submission Assignment"] === true, "None submission type marked complete automatically");
   assert(results["External Tool (Not Graded)"] === false, "External Tool without score left incomplete");
+  
+  // 3 New edge case verifications
+  assert(results["Group Assignment"] === true, "Group Assignment marked complete via submitted_at");
+  assert(results["Excused Assignment"] === true, "Excused Assignment marked complete via excused flag");
+  assert(results["Third-party Quiz"] === true, "Third-party Quiz marked complete via score !== null");
 
   if (process.exitCode !== 1) {
     console.log("\\nAll tests passed perfectly! The refactor works as expected.");

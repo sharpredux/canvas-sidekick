@@ -274,20 +274,42 @@ async function fetchCanvasDataInternal(schoolUrl) {
 
     let isCompleted = false;
     if (event.assignment) {
-      // 1. Check if the assignment submission API explicitly says it's submitted/graded
-      const state = submissionsMap[event.assignment.id.toString()];
-      if (state === 'submitted' || state === 'graded' || state === 'pending_review') {
+      const sub = submissionsScoreMap[event.assignment.id.toString()];
+
+      // 1. Explicit Workflow States
+      if (sub && (sub.workflow_state === 'submitted' || sub.workflow_state === 'graded' || sub.workflow_state === 'pending_review')) {
         isCompleted = true;
       }
-      // 2. Fallback in case upcoming_events embedded it anyway
-      else if (event.assignment.submission && event.assignment.submission.workflow_state) {
+      
+      // 2. The Excused Flag
+      if (!isCompleted && sub && sub.excused === true) {
+        isCompleted = true;
+      }
+
+      // 3. The Submitted_At Timestamp (Catches Group Assignments)
+      if (!isCompleted && sub && sub.submitted_at) {
+        isCompleted = true;
+      }
+
+      // 4. The Graded Flag / Score Presence
+      if (!isCompleted && sub && sub.score !== null && sub.score !== undefined) {
+        isCompleted = true;
+      }
+
+      // 5. Assignment-Level Submission Flag
+      if (!isCompleted && event.assignment.has_submitted_submissions === true) {
+        isCompleted = true;
+      }
+
+      // 6. Fallback in case upcoming_events embedded it anyway
+      if (!isCompleted && event.assignment.submission && event.assignment.submission.workflow_state) {
         const embeddedState = event.assignment.submission.workflow_state;
         if (embeddedState === 'submitted' || embeddedState === 'graded' || embeddedState === 'pending_review') {
           isCompleted = true;
         }
       }
       
-      // 3. Edge Case: Assignments that do not require online submissions
+      // 7. Edge Case: Assignments that do not require online submissions
       // Prevent "Missing" false positives for assignments the user literally cannot submit online
       if (!isCompleted && event.assignment.submission_types) {
         const sTypes = event.assignment.submission_types;
