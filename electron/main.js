@@ -125,6 +125,46 @@ function decodeHtmlEntities(str) {
 
 // ─── Canvas Fetch (shared by IPC handler + polling loop) ─────────────────────
 
+async function fetchPaginatedCanvasData(url, headers) {
+  let results = [];
+  let nextUrl = url;
+  if (!nextUrl.includes('per_page=')) {
+    nextUrl += nextUrl.includes('?') ? '&per_page=100' : '?per_page=100';
+  }
+
+  while (nextUrl) {
+    const res = await net.fetch(nextUrl, { headers, credentials: 'include' });
+    if (res.status === 401) {
+      throw new Error('unauthorized');
+    }
+    if (!res.ok) break;
+    
+    const data = await res.json();
+    if (Array.isArray(data)) {
+      results = results.concat(data);
+    } else {
+      results.push(data);
+      break;
+    }
+
+    const linkHeader = res.headers.get('link');
+    let foundNext = false;
+    if (linkHeader) {
+      const links = linkHeader.split(',');
+      const nextMatch = links.find(l => l.includes('rel="next"'));
+      if (nextMatch) {
+        const urlMatch = nextMatch.match(/<([^>]+)>/);
+        if (urlMatch) {
+          nextUrl = urlMatch[1];
+          foundNext = true;
+        }
+      }
+    }
+    if (!foundNext) break;
+  }
+  return results;
+}
+
 async function ensureCookieLoaded(schoolUrl) {
   try {
     const urlObj = new URL(schoolUrl);
@@ -176,21 +216,21 @@ async function fetchCanvasDataInternal(schoolUrl) {
     'Accept': 'application/json'
   };
 
-  // 1. Fetch upcoming events using Electron's native net.fetch
-  const res = await net.fetch(`${schoolUrl}/api/v1/users/self/upcoming_events`, {
-    headers,
-    credentials: 'include'
-  });
-  if (res.status === 401) {
-    try { fs.unlinkSync(cookiePath); } catch (e) { console.error(e); }
-    try {
-      const urlObj = new URL(schoolUrl);
-      await session.defaultSession.cookies.remove(urlObj.origin, 'canvas_session');
-    } catch (e) { console.error(e); }
-    throw new Error('unauthorized');
+  // 1. Fetch upcoming events using pagination
+  let eventsData = [];
+  try {
+    eventsData = await fetchPaginatedCanvasData(`${schoolUrl}/api/v1/users/self/upcoming_events`, headers);
+  } catch (err) {
+    if (err.message === 'unauthorized') {
+      try { fs.unlinkSync(cookiePath); } catch (e) { console.error(e); }
+      try {
+        const urlObj = new URL(schoolUrl);
+        await session.defaultSession.cookies.remove(urlObj.origin, 'canvas_session');
+      } catch (e) { console.error(e); }
+      throw err;
+    }
+    return [];
   }
-  if (!res.ok) return [];
-  const eventsData = await res.json();
 
   // Group assignment IDs by course for batch submission fetching
   const courseAssignments = {};
@@ -203,25 +243,24 @@ async function fetchCanvasDataInternal(schoolUrl) {
   });
 
   const submissionsMap = {}; // mapping of assignment_id -> workflow_state
+  const submissionsScoreMap = {}; // mapping of assignment_id -> submission object
   
   for (const [courseId, assignmentIds] of Object.entries(courseAssignments)) {
-    // Canvas allows querying multiple assignment submissions at once
-    const query = assignmentIds.map(id => `assignment_ids[]=${id}`).join('&');
-    try {
-      const subRes = await net.fetch(`${schoolUrl}/api/v1/courses/${courseId}/students/submissions?student_ids[]=self&${query}`, {
-        headers,
-        credentials: 'include'
-      });
-      if (subRes.ok) {
-        const subData = await subRes.json();
+    // Chunk into 20 per request to prevent URI Too Long (414)
+    for (let i = 0; i < assignmentIds.length; i += 20) {
+      const chunk = assignmentIds.slice(i, i + 20);
+      const query = chunk.map(id => `assignment_ids[]=${id}`).join('&');
+      try {
+        const subData = await fetchPaginatedCanvasData(`${schoolUrl}/api/v1/courses/${courseId}/students/submissions?student_ids[]=self&${query}`, headers);
         if (Array.isArray(subData)) {
           subData.forEach(sub => {
             submissionsMap[sub.assignment_id.toString()] = sub.workflow_state;
+            submissionsScoreMap[sub.assignment_id.toString()] = sub;
           });
         }
+      } catch (err) {
+        console.error(`[fetch] Failed to fetch submissions for course ${courseId}:`, err);
       }
-    } catch (err) {
-      console.error(`[fetch] Failed to fetch submissions for course ${courseId}:`, err);
     }
   }
 
@@ -247,6 +286,28 @@ async function fetchCanvasDataInternal(schoolUrl) {
           isCompleted = true;
         }
       }
+      
+      // 3. Edge Case: Assignments that do not require online submissions
+      // Prevent "Missing" false positives for assignments the user literally cannot submit online
+      if (!isCompleted && event.assignment.submission_types) {
+        const sTypes = event.assignment.submission_types;
+        const canSubmitOnline = sTypes.some(type => 
+          !['none', 'not_graded', 'on_paper', 'external_tool'].includes(type)
+        );
+        if (!canSubmitOnline) {
+          if (sTypes.includes('external_tool')) {
+            const sub = submissionsScoreMap[event.assignment.id.toString()];
+            const hasScore = sub && sub.score !== null && sub.score !== undefined;
+            const hasSubmittedSubmissions = event.assignment.has_submitted_submissions === true;
+            if (hasScore || hasSubmittedSubmissions) {
+              isCompleted = true;
+            }
+          } else {
+            // Since it can't be submitted online (and isn't an external tool), we mark it as completed to prevent false 'Missing' flags
+            isCompleted = true;
+          }
+        }
+      }
     }
 
     return {
@@ -264,22 +325,16 @@ async function fetchCanvasDataInternal(schoolUrl) {
   const courseMap = new Map();
   const courseIds = [];
   try {
-    const coursesRes = await net.fetch(`${schoolUrl}/api/v1/courses?enrollment_state=active`, {
-      headers,
-      credentials: 'include'
-    });
-    if (coursesRes.ok) {
-      const coursesData = await coursesRes.json();
-      if (Array.isArray(coursesData)) {
-        coursesData.forEach(c => {
-          if (c.id) {
-            const contextCode = `course_${c.id}`;
-            const displayName = c.course_code || c.name || 'Canvas Course';
-            courseMap.set(contextCode, displayName);
-            courseIds.push(contextCode);
-          }
-        });
-      }
+    const coursesData = await fetchPaginatedCanvasData(`${schoolUrl}/api/v1/courses?enrollment_state=active`, headers);
+    if (Array.isArray(coursesData)) {
+      coursesData.forEach(c => {
+        if (c.id) {
+          const contextCode = `course_${c.id}`;
+          const displayName = c.course_code || c.name || 'Canvas Course';
+          courseMap.set(contextCode, displayName);
+          courseIds.push(contextCode);
+        }
+      });
     }
   } catch (err) {
     console.error('[fetch] Failed to fetch active courses:', err);
@@ -299,33 +354,27 @@ async function fetchCanvasDataInternal(schoolUrl) {
       });
       announcementsUrl += `start_date=${startDateIso}`;
 
-      const annRes = await net.fetch(announcementsUrl, {
-        headers,
-        credentials: 'include'
-      });
-      if (annRes.ok) {
-        const annData = await annRes.json();
-        if (Array.isArray(annData)) {
-          annData.forEach(ann => {
-            const postedDate = new Date(ann.posted_at || ann.created_at);
-            if (postedDate >= fourteenDaysAgo) {
-              let msg = ann.message || '';
-              msg = msg.replace(/<\/?(?:p|div|br|h[1-6]|li|ol|ul)\b[^>]*>/gi, ' ');
-              const strippedMessage = msg.replace(/<[^>]*>/g, '').trim();
-              const courseName = courseMap.get(ann.context_code) || 'Canvas Course';
-              const authorName = ann.user_name || (ann.author && ann.author.display_name) || 'Unknown';
-              announcements.push({
-                id: ann.id ? ann.id.toString() : Math.random().toString(),
-                type: 'announcement',
-                title: decodeHtmlEntities(ann.title || 'Announcement'),
-                course: courseName,
-                date: ann.posted_at || ann.created_at,
-                preview: decodeHtmlEntities(strippedMessage),
-                author: authorName
-              });
-            }
-          });
-        }
+      const annData = await fetchPaginatedCanvasData(announcementsUrl, headers);
+      if (Array.isArray(annData)) {
+        annData.forEach(ann => {
+          const postedDate = new Date(ann.posted_at || ann.created_at);
+          if (postedDate >= fourteenDaysAgo) {
+            let msg = ann.message || '';
+            msg = msg.replace(/<\/?(?:p|div|br|h[1-6]|li|ol|ul)\b[^>]*>/gi, ' ');
+            const strippedMessage = msg.replace(/<[^>]*>/g, '').trim();
+            const courseName = courseMap.get(ann.context_code) || 'Canvas Course';
+            const authorName = ann.user_name || (ann.author && ann.author.display_name) || 'Unknown';
+            announcements.push({
+              id: ann.id ? ann.id.toString() : Math.random().toString(),
+              type: 'announcement',
+              title: decodeHtmlEntities(ann.title || 'Announcement'),
+              course: courseName,
+              date: ann.posted_at || ann.created_at,
+              preview: decodeHtmlEntities(strippedMessage),
+              author: authorName
+            });
+          }
+        });
       }
     } catch (err) {
       console.error('[fetch] Failed to fetch announcements:', err);
@@ -335,31 +384,25 @@ async function fetchCanvasDataInternal(schoolUrl) {
   // 5. Fetch submission comments
   let comments = [];
   try {
-    const streamRes = await net.fetch(`${schoolUrl}/api/v1/users/self/activity_stream`, {
-      headers,
-      credentials: 'include'
-    });
-    if (streamRes.ok) {
-      const streamData = await streamRes.json();
-      if (Array.isArray(streamData)) {
-        streamData.forEach(item => {
-          if (item && item.type === 'Submission' && Array.isArray(item.submission_comments)) {
-            const contextCode = item.context_code || (item.course_id ? `course_${item.course_id}` : '');
-            const courseName = courseMap.get(contextCode) || 'Canvas Course';
-            item.submission_comments.forEach(c => {
-              comments.push({
-                id: c.id ? c.id.toString() : Math.random().toString(),
-                type: 'comment',
-                title: item.title ? `Feedback on ${item.title}` : 'Feedback on Submission',
-                course: courseName,
-                date: c.created_at,
-                preview: c.comment || '',
-                author: c.author_name || 'Unknown'
-              });
+    const streamData = await fetchPaginatedCanvasData(`${schoolUrl}/api/v1/users/self/activity_stream`, headers);
+    if (Array.isArray(streamData)) {
+      streamData.forEach(item => {
+        if (item && item.type === 'Submission' && Array.isArray(item.submission_comments)) {
+          const contextCode = item.context_code || (item.course_id ? `course_${item.course_id}` : '');
+          const courseName = courseMap.get(contextCode) || 'Canvas Course';
+          item.submission_comments.forEach(c => {
+            comments.push({
+              id: c.id ? c.id.toString() : Math.random().toString(),
+              type: 'comment',
+              title: item.title ? `Feedback on ${item.title}` : 'Feedback on Submission',
+              course: courseName,
+              date: c.created_at,
+              preview: c.comment || '',
+              author: c.author_name || 'Unknown'
             });
-          }
-        });
-      }
+          });
+        }
+      });
     }
   } catch (err) {
     console.error('[fetch] Failed to fetch submission comments:', err);
@@ -620,6 +663,8 @@ function registerIpcAndSessionHandlers() {
   });
 
   ipcMain.on('open-canvas-login', async (event, loginUrl = 'https://canvas.instructure.com/') => {
+    let loginSucceeded = false;
+
     const loginWin = new BrowserWindow({
       width: 800,
       height: 600,
@@ -627,6 +672,21 @@ function registerIpcAndSessionHandlers() {
     });
 
     loginWin.loadURL(loginUrl);
+
+    // Timeout: auto-close and notify after 3 minutes
+    const loginTimeout = setTimeout(() => {
+      if (!loginSucceeded && !loginWin.isDestroyed()) {
+        loginWin.close();
+      }
+    }, 3 * 60 * 1000);
+
+    // Detect if the window is closed without a successful login
+    loginWin.on('closed', () => {
+      clearTimeout(loginTimeout);
+      if (!loginSucceeded) {
+        event.reply('canvas-login-failed', 'cancelled');
+      }
+    });
 
     loginWin.webContents.on('did-navigate', async (e, url) => {
       if (url.includes('/login') || url.includes('saml') || url.includes('duosecurity')) return;
@@ -638,6 +698,8 @@ function registerIpcAndSessionHandlers() {
           const canvasSessionCookie = cookies.find(c => c.name === 'canvas_session');
 
           if (canvasSessionCookie) {
+            loginSucceeded = true;
+            clearTimeout(loginTimeout);
             loginWin.close();
             event.reply('canvas-login-success');
           }

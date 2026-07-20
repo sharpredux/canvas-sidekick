@@ -5,6 +5,7 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
   const [status, setStatus] = useState('idle');
   const [schoolUrl, setSchoolUrl] = useState(defaultSchoolUrl);
   const [prevDefaultSchoolUrl, setPrevDefaultSchoolUrl] = useState(defaultSchoolUrl);
+  const [loginError, setLoginError] = useState(null);
 
   if (defaultSchoolUrl !== prevDefaultSchoolUrl) {
     setPrevDefaultSchoolUrl(defaultSchoolUrl);
@@ -19,6 +20,9 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
     e.preventDefault();
     if (!schoolUrl) return;
 
+    // Clear any previous error
+    setLoginError(null);
+
     // Ensure the URL is properly formatted
     let finalUrl = schoolUrl.trim();
     if (!finalUrl.startsWith('http')) {
@@ -31,11 +35,18 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
       
       // Override the old event listener to ensure we capture the finalUrl
       window.api.onCanvasLoginSuccess(() => {
+        setLoginError(null);
         setStatus('success');
         setTimeout(() => {
           setIsOpen(false);
           onAuthenticated(finalUrl);
         }, 1500);
+      });
+
+      // Listen for login failure (window closed or timed out)
+      window.api.onCanvasLoginFailed((reason) => {
+        setStatus('idle');
+        setLoginError(reason === 'timeout' ? 'Login timed out.' : 'Login was cancelled.');
       });
     } else {
       // Mock for standard web browser dev
@@ -99,21 +110,35 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
             type="text" 
             placeholder="canvas.edu" 
             value={schoolUrl}
-            onChange={(e) => setSchoolUrl(e.target.value)}
+            onChange={(e) => { setSchoolUrl(e.target.value); setLoginError(null); }}
             required
             disabled={status === 'authenticating'}
             style={{
               width: '100%',
               padding: '10px',
               borderRadius: 'var(--md-sys-shape-corner-full)',
-              border: 'none',
+              border: loginError ? '2px solid var(--md-sys-color-error)' : 'none',
               background: 'var(--md-sys-color-surface-container-high)',
               color: '#FFFFFF',
               font: 'var(--md-sys-typescale-label-medium)',
               boxSizing: 'border-box',
-              textAlign: 'center'
+              textAlign: 'center',
+              outline: loginError ? '0' : undefined,
+              transition: 'border 0.2s ease'
             }}
           />
+
+          {/* Error message */}
+          {loginError && (
+            <span style={{
+              color: 'var(--md-sys-color-error)',
+              font: 'var(--md-sys-typescale-label-small)',
+              marginTop: '-2px'
+            }}>
+              {loginError}
+            </span>
+          )}
+
           <button 
             type="submit"
             disabled={status === 'authenticating' || !schoolUrl}

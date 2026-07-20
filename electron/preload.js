@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('api', {
   fetchCanvasData: (url) => ipcRenderer.invoke('fetch-canvas-data', url),
   loginCanvas: (url) => ipcRenderer.send('open-canvas-login', url),
   onCanvasLoginSuccess: (callback) => ipcRenderer.on('canvas-login-success', () => callback()),
+  onCanvasLoginFailed: (callback) => ipcRenderer.on('canvas-login-failed', (_event, reason) => callback(reason)),
   startCanvasPolling: (url) => ipcRenderer.send('start-canvas-polling', url),
   onCanvasDataUpdate: (cb) => {
     const listener = (event, data) => cb(data);
