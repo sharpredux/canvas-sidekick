@@ -1,11 +1,10 @@
 export default function ZoomJoinButton({ link }) {
   if (!link) return null;
 
-  const handleJoin = (e) => {
+  const handleJoin = async (e) => {
     e.stopPropagation();
-    if (window.require) {
-      const { shell } = window.require('electron');
-      shell.openExternal(link);
+    if (window.api?.openExternal) {
+      await window.api.openExternal(link);
     } else {
       window.open(link, '_blank');
     }

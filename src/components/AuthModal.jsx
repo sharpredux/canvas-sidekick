@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
   const [isOpen, setIsOpen] = useState(true); // Open by default if no session (mocked logic)
@@ -6,13 +6,42 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
   const [schoolUrl, setSchoolUrl] = useState(defaultSchoolUrl);
   const [prevDefaultSchoolUrl, setPrevDefaultSchoolUrl] = useState(defaultSchoolUrl);
   const [loginError, setLoginError] = useState(null);
+  const pendingUrlRef = useRef('');
+  const completionTimerRef = useRef(null);
 
   if (defaultSchoolUrl !== prevDefaultSchoolUrl) {
     setPrevDefaultSchoolUrl(defaultSchoolUrl);
     setSchoolUrl(defaultSchoolUrl);
   }
 
-  // We bind the listener directly inside handleLogin to capture the URL.
+  useEffect(() => {
+    if (!window.api) return undefined;
+
+    const unsubscribeSuccess = window.api.onCanvasLoginSuccess((authenticatedUrl) => {
+      setLoginError(null);
+      setStatus('success');
+      completionTimerRef.current = setTimeout(() => {
+        setIsOpen(false);
+        onAuthenticated(authenticatedUrl || pendingUrlRef.current);
+      }, 500);
+    });
+
+    const unsubscribeFailure = window.api.onCanvasLoginFailed((reason) => {
+      setStatus('idle');
+      const messages = {
+        timeout: 'Login timed out.',
+        'invalid-url': 'Enter a valid Canvas URL.',
+        'load-failed': 'Canvas could not be opened.'
+      };
+      setLoginError(messages[reason] || 'Login was cancelled.');
+    });
+
+    return () => {
+      if (typeof unsubscribeSuccess === 'function') unsubscribeSuccess();
+      if (typeof unsubscribeFailure === 'function') unsubscribeFailure();
+      clearTimeout(completionTimerRef.current);
+    };
+  }, [onAuthenticated]);
 
   if (!isOpen) return null;
 
@@ -29,25 +58,10 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
       finalUrl = `https://${finalUrl}`;
     }
 
+    pendingUrlRef.current = finalUrl;
     setStatus('authenticating');
     if (window.api) {
       window.api.loginCanvas(finalUrl);
-      
-      // Override the old event listener to ensure we capture the finalUrl
-      window.api.onCanvasLoginSuccess(() => {
-        setLoginError(null);
-        setStatus('success');
-        setTimeout(() => {
-          setIsOpen(false);
-          onAuthenticated(finalUrl);
-        }, 1500);
-      });
-
-      // Listen for login failure (window closed or timed out)
-      window.api.onCanvasLoginFailed((reason) => {
-        setStatus('idle');
-        setLoginError(reason === 'timeout' ? 'Login timed out.' : 'Login was cancelled.');
-      });
     } else {
       // Mock for standard web browser dev
       setTimeout(() => {

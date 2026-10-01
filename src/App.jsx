@@ -11,6 +11,7 @@ import SkeletonAgendaItem from './components/SkeletonAgendaItem';
 import AIChatTab from './components/AIChatTab';
 import UpdatesTab from './components/UpdatesTab';
 import { parseScheduleTSV } from './utils/scheduleParser';
+import { applyCompletion, loadCompletionOverrides } from './utils/taskCompletion';
 
 const MOCK_ITEMS = [
   {
@@ -57,12 +58,10 @@ export default function App() {
   const [lastRefreshTime, setLastRefreshTime] = useState(null);
 
   // ── localStorage caches — read once, write-through ────────────────────────
-  const completedIdsRef = useRef(
-    new Set(JSON.parse(localStorage.getItem('localCompletedIds') || '[]'))
-  );
-  const manualTasksRef = useRef(
-    JSON.parse(localStorage.getItem('manualTasks') || '[]')
-  );
+  const [initialTaskCache] = useState(() => JSON.parse(localStorage.getItem('manualTasks') || '[]'));
+  const [initialCompletionOverrides] = useState(() => loadCompletionOverrides(localStorage, initialTaskCache));
+  const manualTasksRef = useRef(initialTaskCache);
+  const completionOverridesRef = useRef(initialCompletionOverrides);
 
   // ── Core data merge ────────────────────────────────────────────────────────
   const mergeItems = useCallback((newItems) => {
@@ -76,26 +75,23 @@ export default function App() {
         if (persistedMap.has(item.id)) {
           const existing = persistedMap.get(item.id);
           persistedMap.set(item.id, { 
-            ...item, 
+            ...applyCompletion(item, completionOverridesRef.current, existing),
             timeEstimate: item.timeEstimate || existing.timeEstimate,
-            completed: completedIdsRef.current.has(item.id) || !!item.completed 
           });
         } else {
-          persistedMap.set(item.id, {
-            ...item,
-            completed: completedIdsRef.current.has(item.id) || !!item.completed
-          });
+          persistedMap.set(item.id, applyCompletion(item, completionOverridesRef.current));
         }
       });
       
       const mergedArray = Array.from(persistedMap.values());
       manualTasksRef.current = mergedArray;
       localStorage.setItem('manualTasks', JSON.stringify(mergedArray));
+      localStorage.setItem('taskCompletionOverrides', JSON.stringify(completionOverridesRef.current));
       
       setItems(mergedArray.map(m => m.isManual ? { ...m, isCustom: true } : m));
     } else {
       const mergedCanvasItems = newItems.map(item =>
-        completedIdsRef.current.has(item.id) ? { ...item, completed: true } : item
+        applyCompletion(item, completionOverridesRef.current)
       );
       setItems([...mergedCanvasItems, ...manualTasksRef.current.map(m => ({ ...m, isCustom: true }))]);
     }
@@ -154,7 +150,7 @@ export default function App() {
     }
     try {
       if (window.api && url) {
-        const realData = await window.api.fetchCanvasData(url);
+        const realData = await window.api.fetchCanvasData(url, manualTasksRef.current);
         mergeItems(Array.isArray(realData) ? realData : MOCK_ITEMS);
       } else {
         await new Promise(r => setTimeout(r, 1500));
@@ -165,7 +161,7 @@ export default function App() {
       if (err.message?.includes('no_cookie') || err.message?.includes('decrypt_failed') || err.message?.includes('unauthorized')) {
         setIsAuthenticated(false);
       } else {
-        mergeItems(MOCK_ITEMS); // Fallback to mock items to avoid lockup
+        mergeItems([]); // Keep the last known tasks during a connection failure.
       }
     } finally {
       setIsLoading(false);
@@ -200,7 +196,7 @@ export default function App() {
           if (hasSession) {
             try {
               if (window.api?.fetchCanvasData) {
-                const realData = await window.api.fetchCanvasData(loadedSchoolUrl);
+                const realData = await window.api.fetchCanvasData(loadedSchoolUrl, manualTasksRef.current);
                 mergeItems(Array.isArray(realData) ? realData : MOCK_ITEMS);
                 setIsAuthenticated(true);
               } else {
@@ -214,7 +210,7 @@ export default function App() {
                 setIsAuthenticated(false);
               } else {
                 // network / connection issue
-                mergeItems(MOCK_ITEMS);
+                mergeItems([]);
                 setIsAuthenticated(true);
               }
             }
@@ -260,7 +256,7 @@ export default function App() {
     if (!isAuthenticated || !schoolUrl || !window.api) return;
     setIsLoading(true);
     try {
-      const realData = await window.api.fetchCanvasData(schoolUrl);
+      const realData = await window.api.fetchCanvasData(schoolUrl, manualTasksRef.current);
       if (Array.isArray(realData)) mergeItems(realData);
     } catch (err) {
       console.error('Manual refresh failed', err);
@@ -276,7 +272,7 @@ export default function App() {
     if (!isAuthenticated || !schoolUrl || !window.api) return;
 
     // Tell main process to start polling
-    window.api.startCanvasPolling(schoolUrl);
+    window.api.startCanvasPolling(schoolUrl, manualTasksRef.current);
 
     // Subscribe to pushed updates
     const unsubscribe = window.api.onCanvasDataUpdate((data) => {
@@ -305,14 +301,18 @@ export default function App() {
         item.id === id ? { ...item, completed: !item.completed } : item
       );
 
-      const isNowCompleted = updatedItems.find(i => i.id === id)?.completed;
+      const updatedItem = updatedItems.find(i => i.id === id);
+      if (!updatedItem) return prevItems;
+      const isNowCompleted = updatedItem.completed;
 
       // Update ref + write-through (no extra localStorage.getItem call)
-      if (isNowCompleted) completedIdsRef.current.add(id);
-      else completedIdsRef.current.delete(id);
+      completionOverridesRef.current[id] = {
+        completed: isNowCompleted,
+        canvasCompleted: updatedItem.canvasCompleted ?? false
+      };
       localStorage.setItem(
-        'localCompletedIds',
-        JSON.stringify(Array.from(completedIdsRef.current))
+        'taskCompletionOverrides',
+        JSON.stringify(completionOverridesRef.current)
       );
 
       // Update manual tasks in ref + write-through
@@ -331,11 +331,11 @@ export default function App() {
     manualTasksRef.current = manualTasksRef.current.filter(item => item.id !== id);
     localStorage.setItem('manualTasks', JSON.stringify(manualTasksRef.current));
     
-    if (completedIdsRef.current.has(id)) {
-      completedIdsRef.current.delete(id);
+    if (completionOverridesRef.current[id]) {
+      delete completionOverridesRef.current[id];
       localStorage.setItem(
-        'localCompletedIds',
-        JSON.stringify(Array.from(completedIdsRef.current))
+        'taskCompletionOverrides',
+        JSON.stringify(completionOverridesRef.current)
       );
     }
   }, []);
@@ -373,7 +373,7 @@ export default function App() {
 
       // Hide completed tasks if their exact deadline has passed EXCEPT in Calendar view
       if (item.completed && activeTab !== 'Calendar') {
-        if (itemDate < today) return false;
+        if (itemDate <= now) return false;
       }
       
       // Hide event/meeting links from previous days EXCEPT in Calendar view

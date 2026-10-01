@@ -22,8 +22,6 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
       window.api.getArchivedTasks(dateStr).then(tasks => {
         setArchivedTasks(tasks || []);
       }).catch(() => setArchivedTasks([]));
-    } else {
-      setArchivedTasks([]);
     }
   }, [selectedDate]);
 
@@ -272,6 +270,7 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
   const handleDayClick = (dayNum, taskCount, hasClass) => {
     if (taskCount === 0 && !hasClass) return;
     const clickedDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), dayNum);
+    setArchivedTasks([]);
     setSelectedDate(clickedDate.getTime());
     if (widgetSize === 'Small') {
       setViewMode('day');
@@ -302,6 +301,7 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
       <div style={{ display: 'flex', flexDirection: 'column', height: inline ? 'auto' : '100%', flex: inline ? '1' : 'none', minHeight: '0', paddingBottom: inline ? '8px' : '0' }}>
         <button 
           onClick={() => {
+            setArchivedTasks([]);
             if (inline) setSelectedDate(null);
             else setViewMode('grid');
           }}

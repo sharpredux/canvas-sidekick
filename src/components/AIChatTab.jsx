@@ -89,15 +89,12 @@ export default function AIChatTab({ widgetSize, setItems, addNewItem }) {
 
   const checkModel = useCallback(async () => {
     try {
-      const res = await fetch('http://127.0.0.1:11434/api/tags');
-      if (res.ok) {
-        const data = await res.json();
-        const hasModel = data.models?.some(m => m.name === 'qwen2.5:3b' || m.name === 'qwen2.5:3b-instruct' || m.name.includes('qwen2.5:3b'));
-        if (hasModel) {
-          setModelStatus('ready');
-        } else {
-          setModelStatus('not_pulled');
-        }
+      const data = await window.api.ollamaTags();
+      const hasModel = data.models?.some(m => m.name === 'qwen2.5:3b' || m.name === 'qwen2.5:3b-instruct' || m.name.includes('qwen2.5:3b'));
+      if (hasModel) {
+        setModelStatus('ready');
+      } else {
+        setModelStatus('not_pulled');
       }
     } catch (err) {
       console.error(err);
@@ -108,13 +105,9 @@ export default function AIChatTab({ widgetSize, setItems, addNewItem }) {
   const checkOllama = useCallback(async () => {
     setOllamaStatus('checking');
     try {
-      const res = await fetch('http://127.0.0.1:11434/api/version');
-      if (res.ok) {
-        setOllamaStatus('online');
-        checkModel();
-      } else {
-        setOllamaStatus('offline');
-      }
+      await window.api.ollamaVersion();
+      setOllamaStatus('online');
+      checkModel();
     } catch {
       setOllamaStatus('offline');
     }
@@ -128,40 +121,16 @@ export default function AIChatTab({ widgetSize, setItems, addNewItem }) {
   const handlePullModel = async () => {
     setModelStatus('pulling');
     setPullProgress(0);
+    const unsubscribe = window.api.onOllamaPullProgress(setPullProgress);
     try {
-      const response = await fetch('http://127.0.0.1:11434/api/pull', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'qwen2.5:3b' })
-      });
-
-      if (!response.body) {
-        throw new Error('ReadableStream not supported');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n').filter(Boolean);
-        for (const line of lines) {
-          try {
-            const data = JSON.parse(line);
-            if (data.total && data.completed) {
-              setPullProgress(Math.round((data.completed / data.total) * 100));
-            }
-          } catch {
-            // ignore JSON parse errors for incomplete chunks
-          }
-        }
-      }
+      await window.api.ollamaPull('qwen2.5:3b');
+      setPullProgress(100);
       setModelStatus('ready');
     } catch (err) {
       console.error(err);
       setModelStatus('not_pulled');
+    } finally {
+      unsubscribe();
     }
   };
 
@@ -201,7 +170,9 @@ export default function AIChatTab({ widgetSize, setItems, addNewItem }) {
             <button 
               className="md-pill"
               style={{ border: 'none', cursor: 'pointer', margin: 0 }}
-              onClick={() => window.open('https://ollama.com/download', '_blank')}
+              onClick={() => window.api?.openExternal
+                ? window.api.openExternal('https://ollama.com/download')
+                : window.open('https://ollama.com/download', '_blank')}
             >
               Download
             </button>
