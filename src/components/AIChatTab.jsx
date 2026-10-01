@@ -137,7 +137,7 @@ export default function AIChatTab({ widgetSize, setItems, addNewItem }) {
   const isCompact = widgetSize === 'Small';
 
   return (
-    <div style={{
+    <div className="ai-chat" style={{
       display: 'flex', flexDirection: 'column', height: '100%',
       padding: isCompact ? '4px' : '12px', gap: '12px',
       alignItems: 'center', justifyContent: 'center', textAlign: 'center',

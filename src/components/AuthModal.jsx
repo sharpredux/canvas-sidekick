@@ -81,7 +81,7 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
   };
 
   return (
-    <div style={{
+    <div className="auth-modal" style={{
       position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
       background: '#000000',
       zIndex: 100, display: 'flex', flexDirection: 'column',

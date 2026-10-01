@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  platform: process.platform,
   closeApp:    () => ipcRenderer.send('close-app'),
   minimizeApp: () => ipcRenderer.send('minimize-app'),
   fetchCanvasData: (url, trackedTasks = []) => ipcRenderer.invoke('fetch-canvas-data', url, trackedTasks),

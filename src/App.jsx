@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import './index.css';
+import { normalizeSettings, TEXT_SCALES } from '../electron/widgetPreferences.js';
 
 import TabBar from './components/TabBar';
 import AgendaItem from './components/AgendaItem';
@@ -55,6 +56,8 @@ export default function App() {
   const [rawScheduleText, setRawScheduleText] = useState('');
   const [isLoading, setIsLoading]           = useState(false);
   const [widgetSize, setWidgetSize]         = useState('Medium');
+  const [textSize, setTextSize] = useState('Standard');
+  const isLinux = document.documentElement.dataset.platform === 'linux';
   const [lastRefreshTime, setLastRefreshTime] = useState(null);
 
   // ── localStorage caches — read once, write-through ────────────────────────
@@ -174,7 +177,8 @@ export default function App() {
       try {
         let loadedSchoolUrl = '';
         if (window.api?.loadSettings) {
-          const settings = await window.api.loadSettings();
+          const settings = normalizeSettings(await window.api.loadSettings());
+          setTextSize(settings.textSize);
           if (settings?.size) setWidgetSize(settings.size);
           if (settings?.schoolUrl) {
             loadedSchoolUrl = settings.schoolUrl;
@@ -250,6 +254,12 @@ export default function App() {
       window.api.resizeWindow(size);
     }
   }, [schoolUrl]);
+
+  const handleTextSizeChange = useCallback((value) => {
+    const normalized = normalizeSettings({ textSize: value }).textSize;
+    setTextSize(normalized);
+    window.api?.saveSettings({ textSize: normalized });
+  }, []);
 
   // ── Manual refresh (Settings panel button) ─────────────────────────────────
   const forceRefreshCanvas = useCallback(async () => {
@@ -415,7 +425,9 @@ export default function App() {
   // ── Render ─────────────────────────────────────────────────────────────────
   if (isCheckingAuth) {
     return (
-      <div className={`app-container ${widgetSize === 'Small' ? 'compact-mode' : ''}`}>
+      <div className={`app-container ${widgetSize === 'Small' ? 'compact-mode' : ''} ${isLinux ? 'linux-widget' : ''}`}
+      data-size={widgetSize}
+      style={isLinux ? { '--text-scale': TEXT_SCALES[textSize] } : undefined}>
         <div style={{
           display: 'flex',
           flexDirection: 'column',
@@ -451,7 +463,9 @@ export default function App() {
   }
 
   return (
-    <div className={`app-container ${widgetSize === 'Small' ? 'compact-mode' : ''}`}>
+    <div className={`app-container ${widgetSize === 'Small' ? 'compact-mode' : ''} ${isLinux ? 'linux-widget' : ''}`}
+      data-size={widgetSize}
+      style={isLinux ? { '--text-scale': TEXT_SCALES[textSize] } : undefined}>
       {!isAuthenticated && (
         <AuthModal onAuthenticated={handleAuthenticated} defaultSchoolUrl={schoolUrl} />
       )}
@@ -470,6 +484,8 @@ export default function App() {
             onScheduleSave={handleScheduleSave}
             initialRawText={rawScheduleText}
             onManualRefresh={forceRefreshCanvas}
+            currentTextSize={textSize}
+            onTextSizeChange={isLinux ? handleTextSizeChange : undefined}
             currentSize={widgetSize}
             onSizeChange={handleSizeChange}
             lastRefreshTime={lastRefreshTime}
@@ -514,7 +530,7 @@ export default function App() {
             </span>
           </div>
         ) : (
-          (widgetSize === 'Small' ? filteredItems.slice(0, 1) : filteredItems).map(item => (
+          (widgetSize === 'Small' && !isLinux ? filteredItems.slice(0, 1) : filteredItems).map(item => (
             <AgendaItem
               key={item.id}
               item={item}

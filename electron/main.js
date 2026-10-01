@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { applyLinuxDesktopHints, getLinuxStartupStatus, setLinuxStartupStatus } from './linux.js';
+import { normalizeSettings, mergeSettings, getWindowSize, fitWindowBounds } from './widgetPreferences.js';
 import { fetchPaginatedCanvasData as fetchCanvasPages, mapCanvasTasks } from './canvasTasks.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -380,20 +381,30 @@ function startPolling(schoolUrl, webContents, trackedTasks = []) {
   pollingInterval = setInterval(tick, 15 * 60 * 1000);
 }
 
-function getStoredWindowSize() {
-  const SIZES = {
-    Small: { width: 200, height: 200 },
-    Medium: { width: 280, height: 448 },
-    Large: { width: 280, height: 560 }
-  };
+function readSettings() {
   try {
     const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-    if (fs.existsSync(settingsPath)) {
-      const data = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-      if (data?.size && SIZES[data.size]) return SIZES[data.size];
-    }
-  } catch (e) { console.error(e); }
-  return SIZES.Medium;
+    if (fs.existsSync(settingsPath)) return normalizeSettings(JSON.parse(fs.readFileSync(settingsPath, 'utf8')));
+  } catch (error) { console.error(error); }
+  return normalizeSettings();
+}
+
+function getStoredWindowSize() {
+  return getWindowSize(readSettings().size, process.platform);
+}
+
+function resizeWidget(sizeName) {
+  if (!mainWindow) return;
+  const dimensions = getWindowSize(sizeName, process.platform);
+  mainWindow.setResizable(true);
+  if (process.platform === 'linux') {
+    const bounds = mainWindow.getBounds();
+    const { workArea } = screen.getDisplayMatching(bounds);
+    mainWindow.setBounds(fitWindowBounds({ ...bounds, ...dimensions }, workArea));
+  } else {
+    mainWindow.setSize(dimensions.width, dimensions.height);
+  }
+  mainWindow.setResizable(false);
 }
 
 // ─── Window ───────────────────────────────────────────────────────────────────
@@ -403,10 +414,11 @@ function createWindow() {
   const linuxPosition = process.platform === 'linux'
     ? (() => {
         const { workArea } = screen.getPrimaryDisplay();
-        return {
+        return fitWindowBounds({
+          ...size,
           x: workArea.x + workArea.width - size.width - 24,
           y: workArea.y + 24
-        };
+        }, workArea);
       })()
     : {};
 
@@ -427,7 +439,7 @@ function createWindow() {
       contextIsolation: true,
       webSecurity: true,
       preload: path.join(__dirname, 'preload.js'),
-      zoomFactor: 0.75,
+      zoomFactor: process.platform === 'linux' ? 1 : 0.75,
       backgroundThrottling: true // Allow OS to throttle timers when widget is not focused
     }
   });
@@ -464,8 +476,7 @@ function createWindow() {
   mainWindow.on('enter-full-screen', () => {
     if (!mainWindow) return;
     mainWindow.setFullScreen(false);
-    const storedSize = getStoredWindowSize();
-    mainWindow.setSize(storedSize.width, storedSize.height);
+    resizeWidget(readSettings().size);
   });
 
   // Intercept Win+D / 3-finger swipe "Show Desktop" gesture.
@@ -508,13 +519,10 @@ function registerIpcAndSessionHandlers() {
   const schedulePath = path.join(app.getPath('userData'), 'schedule.txt');
 
   ipcMain.on('save-settings', (event, settings) => {
-    try { fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8'); } catch (e) { console.error(e); }
+    try { fs.writeFileSync(settingsPath, JSON.stringify(mergeSettings(readSettings(), settings), null, 2), 'utf8'); } catch (e) { console.error(e); }
   });
 
-  ipcMain.handle('load-settings', () => {
-    try { if (fs.existsSync(settingsPath)) return JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch (e) { console.error(e); }
-    return { size: 'Medium' };
-  });
+  ipcMain.handle('load-settings', () => readSettings());
 
   ipcMain.handle('get-archived-tasks', async (event, dateStr) => {
     const filePath = path.join(app.getPath('userData'), 'archive', `${dateStr}.json`);
@@ -570,19 +578,7 @@ function registerIpcAndSessionHandlers() {
     return '';
   });
 
-  const SIZES = {
-    Small: { width: 200, height: 200 },
-    Medium: { width: 280, height: 448 },
-    Large: { width: 280, height: 560 }
-  };
-
-  ipcMain.on('resize-window', (event, sizeName) => {
-    if (!mainWindow) return;
-    const dimensions = SIZES[sizeName] || SIZES.Small;
-    mainWindow.setResizable(true);
-    mainWindow.setSize(dimensions.width, dimensions.height);
-    mainWindow.setResizable(false);
-  });
+  ipcMain.on('resize-window', (_event, sizeName) => resizeWidget(sizeName));
 
   ipcMain.on('open-canvas-login', async (event, loginUrl = 'https://canvas.instructure.com/') => {
     let canvasOrigin;

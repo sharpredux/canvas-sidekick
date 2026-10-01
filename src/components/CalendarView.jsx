@@ -87,6 +87,7 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
               Your Schedule
             </h2>
             <button 
+              aria-label="Back to calendar"
               onClick={() => setIsImportOpen(false)}
               style={{
                 background: 'transparent', border: '1px solid var(--md-sys-color-outline-variant)',
@@ -155,14 +156,14 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
                   <div style={{ font: 'var(--md-sys-typescale-label-large)', color: '#FFFFFF', fontWeight: 600 }}>
                     {course.courseCode}
                   </div>
-                  <div style={{ font: 'var(--md-sys-typescale-body-small)', color: 'var(--md-sys-color-secondary)', fontSize: '10px' }}>
+                  <div style={{ font: 'var(--md-sys-typescale-body-small)', color: 'var(--md-sys-color-secondary)', fontSize: 'var(--widget-metadata-size, 10px)' }}>
                     {course.courseTitle}
                   </div>
                   <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
-                    <div style={{ background: 'var(--md-sys-color-surface-container)', padding: '2px 6px', borderRadius: '14px', font: 'var(--md-sys-typescale-body-small)', fontSize: '9px', color: 'var(--md-sys-color-secondary)' }}>
+                    <div style={{ background: 'var(--md-sys-color-surface-container)', padding: '2px 6px', borderRadius: '14px', font: 'var(--md-sys-typescale-body-small)', fontSize: 'var(--widget-metadata-size, 9px)', color: 'var(--md-sys-color-secondary)' }}>
                       {course.venue}
                     </div>
-                    <div style={{ background: 'var(--md-sys-color-surface-container)', padding: '2px 6px', borderRadius: '14px', font: 'var(--md-sys-typescale-body-small)', fontSize: '9px', color: 'var(--md-sys-color-secondary)' }}>
+                    <div style={{ background: 'var(--md-sys-color-surface-container)', padding: '2px 6px', borderRadius: '14px', font: 'var(--md-sys-typescale-body-small)', fontSize: 'var(--widget-metadata-size, 9px)', color: 'var(--md-sys-color-secondary)' }}>
                       {course.teacher}
                     </div>
                   </div>
@@ -181,6 +182,7 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button 
+              aria-label="Back to calendar"
               onClick={() => setIsImportOpen(false)}
               style={{ background: 'none', border: 'none', color: 'var(--md-sys-color-secondary)', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
             >
@@ -336,11 +338,11 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
                   display: 'flex', flexDirection: 'column', gap: '2px'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ font: 'var(--md-sys-typescale-label-small)', color: 'var(--md-sys-color-primary)', fontSize: '9px' }}>
+                    <span style={{ font: 'var(--md-sys-typescale-label-small)', color: 'var(--md-sys-color-primary)', fontSize: 'var(--widget-metadata-size, 9px)' }}>
                       {course.timeSlot}
                     </span>
                     {course.isOnline && (
-                      <span style={{ font: 'var(--md-sys-typescale-label-small)', color: 'var(--md-sys-color-error)', fontSize: '9px' }}>
+                      <span style={{ font: 'var(--md-sys-typescale-label-small)', color: 'var(--md-sys-color-error)', fontSize: 'var(--widget-metadata-size, 9px)' }}>
                         Online
                       </span>
                     )}
@@ -348,7 +350,7 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
                   <div style={{ font: 'var(--md-sys-typescale-label-medium)', color: '#FFFFFF', fontWeight: 600 }}>
                     {course.courseCode}
                   </div>
-                  <div style={{ font: 'var(--md-sys-typescale-body-small)', color: 'var(--md-sys-color-secondary)', fontSize: '9px' }}>
+                  <div style={{ font: 'var(--md-sys-typescale-body-small)', color: 'var(--md-sys-color-secondary)', fontSize: 'var(--widget-metadata-size, 9px)' }}>
                     {course.venue} {course.teacher ? `• ${course.teacher}` : ''}
                   </div>
                 </div>
@@ -382,7 +384,7 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
   const weekdays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '0 4px', position: 'relative' }}>
+    <div className="calendar-grid-view" style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '0 4px', position: 'relative' }}>
       
       {/* Month Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -402,7 +404,7 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
       {/* Weekday Labels */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', marginBottom: '4px' }}>
         {weekdays.map((wd, i) => (
-          <div key={i} style={{ font: 'var(--md-sys-typescale-label-small)', opacity: 0.5, fontSize: '10px' }}>{wd}</div>
+          <div key={i} style={{ font: 'var(--md-sys-typescale-label-small)', opacity: 0.5, fontSize: 'var(--widget-metadata-size, 10px)' }}>{wd}</div>
         ))}
       </div>
 
@@ -456,12 +458,12 @@ export default function CalendarView({ items, widgetSize, onToggleComplete, onSc
                 background: bg,
                 border: border,
                 color: color,
-                fontSize: '11px',
+                fontSize: 'var(--widget-metadata-size, 11px)',
                 fontWeight: (count > 0 || hasClass) ? 'bold' : 'normal',
                 cursor: cursor,
                 margin: 'auto',
                 width: '100%',
-                maxWidth: '20px',
+                maxWidth: 'var(--calendar-day-size, 20px)',
                 position: 'relative'
               }}
             >

@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@400;500&display=swap');
-
 :root {
   /* watchOS / SF Compact Typography */
   --tab-btn-size: 32px;
@@ -621,4 +619,87 @@ input:checked + .toggle-slider {
 input:checked + .toggle-slider:before {
   transform: translateX(18px);
   background-color: #000000;
+}
+
+/* Linux uses logical desktop pixels and readable text at every widget size. */
+html[data-platform="linux"] body {
+  font-family: "Noto Sans", "DejaVu Sans", sans-serif;
+}
+
+.app-container.linux-widget {
+  --text-scale: 1;
+  --md-sys-typescale-font: "Noto Sans", "DejaVu Sans", sans-serif;
+  --widget-metadata-size: calc(12px * var(--text-scale));
+  --calendar-day-size: calc(28px * var(--text-scale));
+  --md-sys-typescale-title-large: 600 calc(20px * var(--text-scale))/1.3 var(--md-sys-typescale-font);
+  --md-sys-typescale-title-medium: 600 calc(18px * var(--text-scale))/1.3 var(--md-sys-typescale-font);
+  --md-sys-typescale-title-small: 600 calc(16px * var(--text-scale))/1.35 var(--md-sys-typescale-font);
+  --md-sys-typescale-body-large: 400 calc(16px * var(--text-scale))/1.45 var(--md-sys-typescale-font);
+  --md-sys-typescale-body-medium: 400 calc(14px * var(--text-scale))/1.45 var(--md-sys-typescale-font);
+  --md-sys-typescale-body-small: 400 calc(14px * var(--text-scale))/1.4 var(--md-sys-typescale-font);
+  --md-sys-typescale-label-large: 500 calc(14px * var(--text-scale))/1.4 var(--md-sys-typescale-font);
+  --md-sys-typescale-label-medium: 500 calc(13px * var(--text-scale))/1.4 var(--md-sys-typescale-font);
+  --md-sys-typescale-label-small: 500 var(--widget-metadata-size)/1.4 var(--md-sys-typescale-font);
+  border-radius: 24px;
+  font: var(--md-sys-typescale-body-medium);
+}
+
+.linux-widget *, .linux-widget *::before, .linux-widget *::after {
+  box-sizing: border-box;
+}
+
+.linux-widget .compact-top-bar { flex-shrink: 0; }
+.linux-widget .content-area { min-height: 0; overflow-x: hidden; }
+.linux-widget .content-area > * { flex-shrink: 0; min-width: 0; max-width: 100%; }
+.linux-widget .content-col { min-width: 0; }
+.linux-widget .item-course { min-width: 0; }
+.linux-widget .item-time-wrapper, .linux-widget .item-time-text { flex-shrink: 0; }
+.linux-widget .zoom-item-header { min-width: 0; gap: 8px; }
+.linux-widget .zoom-item-course { min-width: 0; overflow-wrap: anywhere; }
+.linux-widget .item-title, .linux-widget .item-preview { overflow-wrap: anywhere; }
+.linux-widget .subject-pill { font-size: var(--widget-metadata-size); }
+.linux-widget .time-col { min-width: 44px; }
+.linux-widget .settings-segment-btn { padding: 8px 4px; }
+.linux-widget .schedule-settings { height: auto !important; min-height: 100%; }
+.linux-widget .schedule-settings > div { flex-shrink: 0; }
+.linux-widget .schedule-settings > div > div { flex-wrap: wrap; gap: 8px; }
+.linux-widget .text-size-setting { display: flex; flex-direction: column; gap: 8px; }
+.linux-widget select {
+  width: 100%;
+  padding: 8px;
+  font: var(--md-sys-typescale-body-medium);
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 8px;
+  color-scheme: dark;
+}
+.linux-widget input, .linux-widget textarea { min-width: 0; max-width: 100%; }
+.linux-widget button { flex-shrink: 0; }
+.linux-widget .calendar-grid-view { height: auto !important; min-height: 100%; }
+.linux-widget .calendar-grid-view > div:last-child { flex-wrap: wrap; }
+.linux-widget .auth-modal {
+  overflow-y: auto;
+  justify-content: safe center !important;
+  padding-top: 44px !important;
+}
+.linux-widget .auth-modal > * { flex-shrink: 0; }
+.linux-widget .ai-chat {
+  min-height: 0;
+  flex: 1 0 240px;
+  overflow-y: auto !important;
+  padding: 8px !important;
+}
+.linux-widget .ai-chat > div:has(form) { min-height: 200px; }
+.linux-widget .ai-chat > div:has(form) > div { min-height: 0; }
+.linux-widget .ai-chat form { flex-shrink: 0; }
+.linux-widget .ai-chat form input { width: 0; }
+
+@media (max-width: 310px) {
+  .linux-widget {
+    --tab-btn-size: 26px;
+    --tab-btn-gap: 4px;
+    --tab-padding-x: 8px;
+  }
+  .linux-widget .content-area { padding-inline: 8px; }
 }
