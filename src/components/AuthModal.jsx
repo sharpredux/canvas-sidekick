@@ -91,7 +91,8 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
     }}>
       <div style={{
         color: 'var(--md-sys-color-primary)', /* Vibrant Cyan */
-        marginBottom: '12px'
+        marginBottom: '4px',
+        transform: 'translateY(-4px)'
       }}>
         {/* Close Button Top Right */}
         <button 
@@ -110,7 +111,11 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
         </svg>
       </div>
 
-      <h2 style={{ font: 'var(--md-sys-typescale-title-small)', margin: '0 0 12px 0' }}>
+      <h2 style={{
+        font: 'var(--md-sys-typescale-title-small)',
+        margin: '0 0 20px 0',
+        transform: 'translateY(-4px)'
+      }}>
         Connect to Canvas
       </h2>
 
@@ -160,13 +165,14 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
               background: 'var(--md-sys-color-primary-container)', /* Neon Green */
               color: '#000000', /* Maximum contrast */
               border: 'none',
-              padding: '10px 12px',
+              padding: '8px 12px',
               borderRadius: 'var(--md-sys-shape-corner-full)',
               font: 'var(--md-sys-typescale-label-medium)',
               fontWeight: 600,
               cursor: (status === 'authenticating' || !schoolUrl) ? 'default' : 'pointer',
               opacity: (status === 'authenticating' || !schoolUrl) ? 0.7 : 1,
-              width: '100%'
+              width: '72%',
+              alignSelf: 'center'
             }}
           >
             {status === 'authenticating' ? 'Waiting...' : 'Log in'}
