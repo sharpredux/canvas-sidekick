@@ -447,14 +447,32 @@ function createWindow() {
   });
 
   const windowInstance = mainWindow;
-  const updateShape = () => applyWidgetWindowShape(windowInstance);
+  const updateShape = () => {
+    if (!windowInstance.isDestroyed()) {
+      applyWidgetWindowShape(windowInstance, screen.getDisplayMatching(windowInstance.getBounds()).scaleFactor);
+    }
+  };
   updateShape();
-  windowInstance.on('resize', updateShape);
+  let shapeRefresh;
+  windowInstance.on('resize', () => {
+    updateShape();
+    // Chromium's X11 configure request can settle after the Electron event.
+    // Refresh once it has reached the server, then leave the shape cached.
+    clearTimeout(shapeRefresh);
+    shapeRefresh = setTimeout(updateShape, 50);
+  });
   screen.on('display-metrics-changed', updateShape);
-  windowInstance.once('closed', () => screen.removeListener('display-metrics-changed', updateShape));
+  // Handle compositor toggles without rebuilding the native shape while dragging.
+  const shapeMonitor = process.platform === 'linux' && process.env.CANVAS_SIDEKICK_NATIVE_WAYLAND !== '1'
+    ? setInterval(updateShape, 1000) : null;
+  windowInstance.once('closed', () => {
+    clearTimeout(shapeRefresh);
+    clearInterval(shapeMonitor);
+    screen.removeListener('display-metrics-changed', updateShape);
+  });
 
-  // Shape the native window before its first visible frame so startup never
-  // exposes a rectangular surface, even without desktop compositing.
+  // Prepare the window before its first visible frame, using smooth transparency
+  // when compositing is available and a native cutout otherwise.
   windowInstance.once('ready-to-show', () => {
     updateShape();
     windowInstance.show();

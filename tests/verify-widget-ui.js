@@ -64,7 +64,7 @@ try {
   await page.evaluate(() => window.api.saveSettings({ schoolUrl: 'https://canvas.mock' }));
   await page.reload();
   await page.locator('.agenda-item').first().waitFor();
-  assert.equal(await application.evaluate(({ app }) => app.getVersion()), '0.1.5');
+  assert.equal(await application.evaluate(({ app }) => app.getVersion()), '0.1.6');
   assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomFactor()), 1);
 
   for (const [size, dimensions] of Object.entries(LINUX_SIZES)) {

@@ -9,9 +9,12 @@ Canvas Sidekick is a compact desktop widget for Canvas LMS assignments, announce
 
 On Linux, the widget remains interactive while requesting the standard EWMH `below`, `sticky`, `skip taskbar`, and `skip pager` states. Native Wayland does not allow applications to control their global position or stacking, so Linux launches through X11/XWayland by default. Set `CANVAS_SIDEKICK_NATIVE_WAYLAND=1` to opt out and use normal Wayland window behavior.
 
-X11/XWayland windows use a native rounded shape before their first visible frame.
-Corners stay rounded when changing widget size, including on desktops with
-compositing disabled. Native Wayland uses the renderer's rounded transparency.
+X11/XWayland windows use antialiased rounded transparency when a desktop compositor
+is active. Only the input region is clipped, so empty corners pass clicks through
+without cutting off the smooth visual edge. If compositing is disabled, a native
+rounded cutout keeps corners clear, but cannot blend edge pixels. Enable desktop
+compositing for smooth corners and dragging. The widget adapts to compositor
+changes without restarting. Native Wayland uses the renderer's rounded transparency.
 
 ## Run from source
 
@@ -93,5 +96,8 @@ display scaling; set `WIDGET_EXECUTABLE` to an unpacked or installed Linux execu
 to test the packaged app. Screenshots are saved in the temporary test directory.
 
 Run `npm run test:widget-corners` in an X11 graphical session to check the actual
-native corner cutouts on cold launches, resizing, and reloads. It also supports
-`WIDGET_DISPLAY_SCALE` and `WIDGET_EXECUTABLE` and uses isolated application data.
+native input regions and visual edges on cold launches, resizing, reloads, and a
+real mouse drag. With compositing active it verifies partially transparent edge
+pixels on the X11 surface; otherwise it checks the fallback cutout. This check
+requires the X11, Xext, and Xtst libraries. It also supports `WIDGET_DISPLAY_SCALE`
+and `WIDGET_EXECUTABLE` and uses isolated application data.
