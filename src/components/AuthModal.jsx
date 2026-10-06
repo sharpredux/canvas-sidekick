@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
   const [isOpen, setIsOpen] = useState(true); // Open by default if no session (mocked logic)
@@ -6,13 +6,42 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
   const [schoolUrl, setSchoolUrl] = useState(defaultSchoolUrl);
   const [prevDefaultSchoolUrl, setPrevDefaultSchoolUrl] = useState(defaultSchoolUrl);
   const [loginError, setLoginError] = useState(null);
+  const pendingUrlRef = useRef('');
+  const completionTimerRef = useRef(null);
 
   if (defaultSchoolUrl !== prevDefaultSchoolUrl) {
     setPrevDefaultSchoolUrl(defaultSchoolUrl);
     setSchoolUrl(defaultSchoolUrl);
   }
 
-  // We bind the listener directly inside handleLogin to capture the URL.
+  useEffect(() => {
+    if (!window.api) return undefined;
+
+    const unsubscribeSuccess = window.api.onCanvasLoginSuccess((authenticatedUrl) => {
+      setLoginError(null);
+      setStatus('success');
+      completionTimerRef.current = setTimeout(() => {
+        setIsOpen(false);
+        onAuthenticated(authenticatedUrl || pendingUrlRef.current);
+      }, 500);
+    });
+
+    const unsubscribeFailure = window.api.onCanvasLoginFailed((reason) => {
+      setStatus('idle');
+      const messages = {
+        timeout: 'Login timed out.',
+        'invalid-url': 'Enter a valid Canvas URL.',
+        'load-failed': 'Canvas could not be opened.'
+      };
+      setLoginError(messages[reason] || 'Login was cancelled.');
+    });
+
+    return () => {
+      if (typeof unsubscribeSuccess === 'function') unsubscribeSuccess();
+      if (typeof unsubscribeFailure === 'function') unsubscribeFailure();
+      clearTimeout(completionTimerRef.current);
+    };
+  }, [onAuthenticated]);
 
   if (!isOpen) return null;
 
@@ -29,25 +58,10 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
       finalUrl = `https://${finalUrl}`;
     }
 
+    pendingUrlRef.current = finalUrl;
     setStatus('authenticating');
     if (window.api) {
       window.api.loginCanvas(finalUrl);
-      
-      // Override the old event listener to ensure we capture the finalUrl
-      window.api.onCanvasLoginSuccess(() => {
-        setLoginError(null);
-        setStatus('success');
-        setTimeout(() => {
-          setIsOpen(false);
-          onAuthenticated(finalUrl);
-        }, 1500);
-      });
-
-      // Listen for login failure (window closed or timed out)
-      window.api.onCanvasLoginFailed((reason) => {
-        setStatus('idle');
-        setLoginError(reason === 'timeout' ? 'Login timed out.' : 'Login was cancelled.');
-      });
     } else {
       // Mock for standard web browser dev
       setTimeout(() => {
@@ -67,7 +81,7 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
   };
 
   return (
-    <div style={{
+    <div className="auth-modal" style={{
       position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
       background: '#000000',
       zIndex: 100, display: 'flex', flexDirection: 'column',
@@ -77,7 +91,8 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
     }}>
       <div style={{
         color: 'var(--md-sys-color-primary)', /* Vibrant Cyan */
-        marginBottom: '12px'
+        marginBottom: '4px',
+        transform: 'translateY(-4px)'
       }}>
         {/* Close Button Top Right */}
         <button 
@@ -96,7 +111,11 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
         </svg>
       </div>
 
-      <h2 style={{ font: 'var(--md-sys-typescale-title-small)', margin: '0 0 12px 0' }}>
+      <h2 style={{
+        font: 'var(--md-sys-typescale-title-small)',
+        margin: '0 0 20px 0',
+        transform: 'translateY(-4px)'
+      }}>
         Connect to Canvas
       </h2>
 
@@ -146,13 +165,14 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
               background: 'var(--md-sys-color-primary-container)', /* Neon Green */
               color: '#000000', /* Maximum contrast */
               border: 'none',
-              padding: '10px 12px',
+              padding: '8px 12px',
               borderRadius: 'var(--md-sys-shape-corner-full)',
               font: 'var(--md-sys-typescale-label-medium)',
               fontWeight: 600,
               cursor: (status === 'authenticating' || !schoolUrl) ? 'default' : 'pointer',
               opacity: (status === 'authenticating' || !schoolUrl) ? 0.7 : 1,
-              width: '100%'
+              width: '72%',
+              alignSelf: 'center'
             }}
           >
             {status === 'authenticating' ? 'Waiting...' : 'Log in'}

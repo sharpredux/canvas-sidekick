@@ -1,7 +1,10 @@
-import { app, BrowserWindow, ipcMain, session, safeStorage, net, powerMonitor } from 'electron';
+import { app, BrowserWindow, ipcMain, session, safeStorage, net, powerMonitor, screen, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { applyLinuxDesktopHints, getLinuxStartupStatus, setLinuxStartupStatus } from './linux.js';
+import { normalizeSettings, mergeSettings, getWindowSize, fitWindowBounds } from './widgetPreferences.js';
+import { fetchPaginatedCanvasData as fetchCanvasPages, mapCanvasTasks } from './canvasTasks.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,6 +43,10 @@ async function initWin32() {
  * making it render below all apps but above the wallpaper — exactly like Rainmeter.
  */
 async function embedInDesktop(windowInstance) {
+  if (process.platform === 'linux') {
+    applyLinuxDesktopHints(windowInstance);
+    return;
+  }
   if (process.platform !== 'win32') return;
   try {
     const initialized = await initWin32();
@@ -103,7 +110,7 @@ function setupAutoLaunch() {
   if (process.platform !== 'win32') return;
   app.setLoginItemSettings({
     openAtLogin: true,
-    name: 'Agitated Kepler'
+    name: 'Canvas Sidekick'
   });
 }
 
@@ -125,44 +132,8 @@ function decodeHtmlEntities(str) {
 
 // ─── Canvas Fetch (shared by IPC handler + polling loop) ─────────────────────
 
-async function fetchPaginatedCanvasData(url, headers) {
-  let results = [];
-  let nextUrl = url;
-  if (!nextUrl.includes('per_page=')) {
-    nextUrl += nextUrl.includes('?') ? '&per_page=100' : '?per_page=100';
-  }
-
-  while (nextUrl) {
-    const res = await net.fetch(nextUrl, { headers, credentials: 'include' });
-    if (res.status === 401) {
-      throw new Error('unauthorized');
-    }
-    if (!res.ok) break;
-    
-    const data = await res.json();
-    if (Array.isArray(data)) {
-      results = results.concat(data);
-    } else {
-      results.push(data);
-      break;
-    }
-
-    const linkHeader = res.headers.get('link');
-    let foundNext = false;
-    if (linkHeader) {
-      const links = linkHeader.split(',');
-      const nextMatch = links.find(l => l.includes('rel="next"'));
-      if (nextMatch) {
-        const urlMatch = nextMatch.match(/<([^>]+)>/);
-        if (urlMatch) {
-          nextUrl = urlMatch[1];
-          foundNext = true;
-        }
-      }
-    }
-    if (!foundNext) break;
-  }
-  return results;
+function fetchPaginatedCanvasData(url, headers) {
+  return fetchCanvasPages(url, headers, (target, options) => net.fetch(target, options));
 }
 
 async function ensureCookieLoaded(schoolUrl) {
@@ -201,7 +172,7 @@ async function ensureCookieLoaded(schoolUrl) {
   }
 }
 
-async function fetchCanvasDataInternal(schoolUrl) {
+async function fetchCanvasDataInternal(schoolUrl, trackedTasks = []) {
   const userDataPath = app.getPath('userData');
   const cookiePath = path.join(userDataPath, 'canvas_cookie');
 
@@ -217,7 +188,7 @@ async function fetchCanvasDataInternal(schoolUrl) {
   };
 
   // 1. Fetch upcoming events using pagination
-  let eventsData = [];
+  let eventsData;
   try {
     eventsData = await fetchPaginatedCanvasData(`${schoolUrl}/api/v1/users/self/upcoming_events`, headers);
   } catch (err) {
@@ -229,119 +200,10 @@ async function fetchCanvasDataInternal(schoolUrl) {
       } catch (e) { console.error(e); }
       throw err;
     }
-    return [];
+    throw err;
   }
 
-  // Group assignment IDs by course for batch submission fetching
-  const courseAssignments = {};
-  eventsData.forEach(event => {
-    if (event.assignment && event.context_code && event.context_code.startsWith('course_')) {
-      const courseId = event.context_code.split('_')[1];
-      if (!courseAssignments[courseId]) courseAssignments[courseId] = [];
-      courseAssignments[courseId].push(event.assignment.id);
-    }
-  });
-
-  const submissionsMap = {}; // mapping of assignment_id -> workflow_state
-  const submissionsScoreMap = {}; // mapping of assignment_id -> submission object
-  
-  for (const [courseId, assignmentIds] of Object.entries(courseAssignments)) {
-    // Chunk into 20 per request to prevent URI Too Long (414)
-    for (let i = 0; i < assignmentIds.length; i += 20) {
-      const chunk = assignmentIds.slice(i, i + 20);
-      const query = chunk.map(id => `assignment_ids[]=${id}`).join('&');
-      try {
-        const subData = await fetchPaginatedCanvasData(`${schoolUrl}/api/v1/courses/${courseId}/students/submissions?student_ids[]=self&${query}`, headers);
-        if (Array.isArray(subData)) {
-          subData.forEach(sub => {
-            submissionsMap[sub.assignment_id.toString()] = sub.workflow_state;
-            submissionsScoreMap[sub.assignment_id.toString()] = sub;
-          });
-        }
-      } catch (err) {
-        console.error(`[fetch] Failed to fetch submissions for course ${courseId}:`, err);
-      }
-    }
-  }
-
-  // Map to widget schema
-  const mappedEvents = eventsData.map(event => {
-    let zoomLink = null;
-    if (event.description) {
-      const match = event.description.match(/https:\/\/(?:[a-zA-Z0-9-]+\.)?zoom\.us\/j\/\d+/);
-      if (match) zoomLink = match[0];
-    }
-
-    let isCompleted = false;
-    if (event.assignment) {
-      const sub = submissionsScoreMap[event.assignment.id.toString()];
-
-      // 1. Explicit Workflow States
-      if (sub && (sub.workflow_state === 'submitted' || sub.workflow_state === 'graded' || sub.workflow_state === 'pending_review')) {
-        isCompleted = true;
-      }
-      
-      // 2. The Excused Flag
-      if (!isCompleted && sub && sub.excused === true) {
-        isCompleted = true;
-      }
-
-      // 3. The Submitted_At Timestamp (Catches Group Assignments)
-      if (!isCompleted && sub && sub.submitted_at) {
-        isCompleted = true;
-      }
-
-      // 4. The Graded Flag / Score Presence
-      if (!isCompleted && sub && sub.score !== null && sub.score !== undefined) {
-        isCompleted = true;
-      }
-
-      // 5. Assignment-Level Submission Flag
-      if (!isCompleted && event.assignment.has_submitted_submissions === true) {
-        isCompleted = true;
-      }
-
-      // 6. Fallback in case upcoming_events embedded it anyway
-      if (!isCompleted && event.assignment.submission && event.assignment.submission.workflow_state) {
-        const embeddedState = event.assignment.submission.workflow_state;
-        if (embeddedState === 'submitted' || embeddedState === 'graded' || embeddedState === 'pending_review') {
-          isCompleted = true;
-        }
-      }
-      
-      // 7. Edge Case: Assignments that do not require online submissions
-      // Prevent "Missing" false positives for assignments the user literally cannot submit online
-      if (!isCompleted && event.assignment.submission_types) {
-        const sTypes = event.assignment.submission_types;
-        const canSubmitOnline = sTypes.some(type => 
-          !['none', 'not_graded', 'on_paper', 'external_tool'].includes(type)
-        );
-        if (!canSubmitOnline) {
-          if (sTypes.includes('external_tool')) {
-            const sub = submissionsScoreMap[event.assignment.id.toString()];
-            const hasScore = sub && sub.score !== null && sub.score !== undefined;
-            const hasSubmittedSubmissions = event.assignment.has_submitted_submissions === true;
-            if (hasScore || hasSubmittedSubmissions) {
-              isCompleted = true;
-            }
-          } else {
-            // Since it can't be submitted online (and isn't an external tool), we mark it as completed to prevent false 'Missing' flags
-            isCompleted = true;
-          }
-        }
-      }
-    }
-
-    return {
-      id: event.id.toString(),
-      type: event.type === 'assignment' ? 'deadline' : 'event',
-      title: event.title,
-      course: event.context_name || 'Canvas Course',
-      dueDate: event.start_at,
-      zoomLink,
-      completed: isCompleted
-    };
-  });
+  const mappedEvents = await mapCanvasTasks(eventsData, schoolUrl, headers, fetchPaginatedCanvasData, trackedTasks);
 
   // 3. Fetch active courses to map course IDs to friendly names/codes
   const courseMap = new Map();
@@ -447,7 +309,7 @@ let lastDataHash    = null;
  * when the Canvas response has actually changed (JSON hash comparison).
  * This eliminates wasteful renderer wake-ups for identical data.
  */
-function startPolling(schoolUrl, webContents) {
+function startPolling(schoolUrl, webContents, trackedTasks = []) {
   if (pollingInterval) {
     clearInterval(pollingInterval);
     pollingInterval = null;
@@ -460,7 +322,8 @@ function startPolling(schoolUrl, webContents) {
       return;
     }
     try {
-      const data = await fetchCanvasDataInternal(schoolUrl);
+      const data = await fetchCanvasDataInternal(schoolUrl, trackedTasks);
+      trackedTasks = data;
       
       // --- LOCAL ARCHIVE LOGIC ---
       try {
@@ -479,7 +342,11 @@ function startPolling(schoolUrl, webContents) {
             const filePath = path.join(archiveDir, `${dateStr}.json`);
             let existing = [];
             if (fs.existsSync(filePath)) {
-              try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch(e) {}
+              try {
+                existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+              } catch {
+                existing = [];
+              }
             }
             const existingIds = new Set(existing.map(t => t.id));
             const newTasks = tasksByDate[dateStr].filter(t => !existingIds.has(t.id));
@@ -514,29 +381,51 @@ function startPolling(schoolUrl, webContents) {
   pollingInterval = setInterval(tick, 15 * 60 * 1000);
 }
 
-function getStoredWindowSize() {
-  const SIZES = {
-    Small: { width: 200, height: 200 },
-    Medium: { width: 280, height: 448 },
-    Large: { width: 280, height: 560 }
-  };
+function readSettings() {
   try {
     const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-    if (fs.existsSync(settingsPath)) {
-      const data = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-      if (data?.size && SIZES[data.size]) return SIZES[data.size];
-    }
-  } catch (e) { console.error(e); }
-  return SIZES.Medium;
+    if (fs.existsSync(settingsPath)) return normalizeSettings(JSON.parse(fs.readFileSync(settingsPath, 'utf8')));
+  } catch (error) { console.error(error); }
+  return normalizeSettings();
+}
+
+function getStoredWindowSize() {
+  return getWindowSize(readSettings().size, process.platform);
+}
+
+function resizeWidget(sizeName) {
+  if (!mainWindow) return;
+  const dimensions = getWindowSize(sizeName, process.platform);
+  mainWindow.setResizable(true);
+  if (process.platform === 'linux') {
+    const bounds = mainWindow.getBounds();
+    const { workArea } = screen.getDisplayMatching(bounds);
+    mainWindow.setBounds(fitWindowBounds({ ...bounds, ...dimensions }, workArea));
+  } else {
+    mainWindow.setSize(dimensions.width, dimensions.height);
+  }
+  mainWindow.setResizable(false);
 }
 
 // ─── Window ───────────────────────────────────────────────────────────────────
 
 function createWindow() {
   const size = getStoredWindowSize();
+  const linuxPosition = process.platform === 'linux'
+    ? (() => {
+        const { workArea } = screen.getPrimaryDisplay();
+        return fitWindowBounds({
+          ...size,
+          x: workArea.x + workArea.width - size.width - 24,
+          y: workArea.y + 24
+        }, workArea);
+      })()
+    : {};
+
   mainWindow = new BrowserWindow({
     width: size.width,
     height: size.height,
+    ...linuxPosition,
     frame: false,
     transparent: true,
     hasShadow: false,
@@ -548,9 +437,9 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
+      webSecurity: true,
       preload: path.join(__dirname, 'preload.js'),
-      zoomFactor: 0.75,
+      zoomFactor: process.platform === 'linux' ? 1 : 0.75,
       backgroundThrottling: true // Allow OS to throttle timers when widget is not focused
     }
   });
@@ -567,6 +456,13 @@ function createWindow() {
     embedInDesktop(mainWindow);
   });
 
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
   // Block F12 (devtools) and F11 (fullscreen) — either key would resize
   // the widget window away from its locked preset size.
   mainWindow.webContents.on('before-input-event', (event, input) => {
@@ -580,8 +476,7 @@ function createWindow() {
   mainWindow.on('enter-full-screen', () => {
     if (!mainWindow) return;
     mainWindow.setFullScreen(false);
-    const storedSize = getStoredWindowSize();
-    mainWindow.setSize(storedSize.width, storedSize.height);
+    resizeWidget(readSettings().size);
   });
 
   // Intercept Win+D / 3-finger swipe "Show Desktop" gesture.
@@ -624,18 +519,15 @@ function registerIpcAndSessionHandlers() {
   const schedulePath = path.join(app.getPath('userData'), 'schedule.txt');
 
   ipcMain.on('save-settings', (event, settings) => {
-    try { fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8'); } catch (e) { console.error(e); }
+    try { fs.writeFileSync(settingsPath, JSON.stringify(mergeSettings(readSettings(), settings), null, 2), 'utf8'); } catch (e) { console.error(e); }
   });
 
-  ipcMain.handle('load-settings', () => {
-    try { if (fs.existsSync(settingsPath)) return JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch (e) { console.error(e); }
-    return { size: 'Medium' };
-  });
+  ipcMain.handle('load-settings', () => readSettings());
 
   ipcMain.handle('get-archived-tasks', async (event, dateStr) => {
     const filePath = path.join(app.getPath('userData'), 'archive', `${dateStr}.json`);
     if (fs.existsSync(filePath)) {
-      try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch(e) { return []; }
+      try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { return []; }
     }
     return [];
   });
@@ -651,14 +543,30 @@ function registerIpcAndSessionHandlers() {
   });
 
   ipcMain.handle('get-startup', () => {
+    if (process.platform === 'linux') return getLinuxStartupStatus();
     return app.getLoginItemSettings().openAtLogin;
   });
 
   ipcMain.on('set-startup', (event, enabled) => {
+    if (process.platform === 'linux') {
+      try {
+        setLinuxStartupStatus(enabled);
+      } catch (error) {
+        console.error('[startup] Failed to update Linux autostart entry:', error);
+      }
+      return;
+    }
     app.setLoginItemSettings({
       openAtLogin: enabled,
-      name: 'Agitated Kepler'
+      name: 'Canvas Sidekick'
     });
+  });
+
+  ipcMain.handle('open-external', async (_event, url) => {
+    if (typeof url !== 'string' || (!url.startsWith('https://') && !url.startsWith('http://'))) {
+      throw new Error('Only HTTP(S) links can be opened externally.');
+    }
+    await shell.openExternal(url);
   });
 
   ipcMain.on('save-schedule', (event, rawText) => {
@@ -670,72 +578,126 @@ function registerIpcAndSessionHandlers() {
     return '';
   });
 
-  const SIZES = {
-    Small: { width: 200, height: 200 },
-    Medium: { width: 280, height: 448 },
-    Large: { width: 280, height: 560 }
-  };
-
-  ipcMain.on('resize-window', (event, sizeName) => {
-    if (!mainWindow) return;
-    const dimensions = SIZES[sizeName] || SIZES.Small;
-    mainWindow.setResizable(true);
-    mainWindow.setSize(dimensions.width, dimensions.height);
-    mainWindow.setResizable(false);
-  });
+  ipcMain.on('resize-window', (_event, sizeName) => resizeWidget(sizeName));
 
   ipcMain.on('open-canvas-login', async (event, loginUrl = 'https://canvas.instructure.com/') => {
+    let canvasOrigin;
+    try {
+      const parsedLoginUrl = new URL(loginUrl);
+      if (parsedLoginUrl.protocol !== 'https:' && parsedLoginUrl.protocol !== 'http:') {
+        throw new Error('Canvas URL must use HTTP or HTTPS');
+      }
+      canvasOrigin = parsedLoginUrl.origin;
+    } catch (error) {
+      console.error('[login] Invalid Canvas URL:', error);
+      event.reply('canvas-login-failed', 'invalid-url');
+      return;
+    }
+
     let loginSucceeded = false;
+    let verificationInFlight = false;
+    let closeReason = 'cancelled';
 
     const loginWin = new BrowserWindow({
       width: 800,
       height: 600,
+      parent: mainWindow || undefined,
       webPreferences: { nodeIntegration: false, contextIsolation: true }
     });
+    const loginSession = loginWin.webContents.session;
 
-    loginWin.loadURL(loginUrl);
+    const reply = (channel, ...args) => {
+      if (!event.sender.isDestroyed()) event.sender.send(channel, ...args);
+    };
 
-    // Timeout: auto-close and notify after 3 minutes
-    const loginTimeout = setTimeout(() => {
+    const cookieMatchesCanvasOrigin = (cookie) => {
+      const canvasHost = new URL(canvasOrigin).hostname;
+      const cookieDomain = cookie.domain.replace(/^\./, '');
+      return canvasHost === cookieDomain || canvasHost.endsWith(`.${cookieDomain}`);
+    };
+
+    let loginTimeout;
+
+    const removeLoginListeners = () => {
+      clearTimeout(loginTimeout);
+      loginSession.cookies.removeListener('changed', handleCookieChange);
+    };
+
+    const completeLogin = () => {
+      if (loginSucceeded) return;
+      loginSucceeded = true;
+      removeLoginListeners();
+      reply('canvas-login-success', canvasOrigin);
+      if (!loginWin.isDestroyed()) loginWin.close();
+    };
+
+    const verifyCanvasLogin = async () => {
+      if (loginSucceeded || verificationInFlight || loginWin.isDestroyed()) return;
+      verificationInFlight = true;
+
+      try {
+        const cookies = await loginSession.cookies.get({
+          url: canvasOrigin,
+          name: 'canvas_session'
+        });
+        if (cookies.length === 0) return;
+
+        // A canvas_session cookie may also exist before authentication. Confirm
+        // it by calling an endpoint that only returns JSON for a logged-in user.
+        const response = await loginSession.fetch(`${canvasOrigin}/api/v1/users/self/profile`, {
+          headers: { Accept: 'application/json' },
+          credentials: 'include',
+          redirect: 'manual'
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.ok && contentType.includes('application/json')) {
+          completeLogin();
+        }
+      } catch (error) {
+        console.warn('[login] Canvas session verification failed:', error.message);
+      } finally {
+        verificationInFlight = false;
+      }
+    };
+
+    function handleCookieChange(_cookieEvent, cookie, _cause, removed) {
+      if (removed || cookie.name !== 'canvas_session' || !cookieMatchesCanvasOrigin(cookie)) return;
+      // Let Chromium finish committing the cookie before the authenticated probe.
+      setTimeout(verifyCanvasLogin, 100);
+    }
+
+    loginSession.cookies.on('changed', handleCookieChange);
+
+    // Canvas installations land on different pages after SSO (dashboard,
+    // courses, profile, etc.), so probe after every relevant navigation rather
+    // than requiring one hard-coded success URL.
+    loginWin.webContents.on('did-navigate', verifyCanvasLogin);
+    loginWin.webContents.on('did-navigate-in-page', verifyCanvasLogin);
+    loginWin.webContents.on('did-finish-load', verifyCanvasLogin);
+
+    loginTimeout = setTimeout(() => {
       if (!loginSucceeded && !loginWin.isDestroyed()) {
+        closeReason = 'timeout';
         loginWin.close();
       }
     }, 3 * 60 * 1000);
 
-    // Detect if the window is closed without a successful login
     loginWin.on('closed', () => {
-      clearTimeout(loginTimeout);
-      if (!loginSucceeded) {
-        event.reply('canvas-login-failed', 'cancelled');
-      }
+      removeLoginListeners();
+      if (!loginSucceeded) reply('canvas-login-failed', closeReason);
     });
 
-    loginWin.webContents.on('did-navigate', async (e, url) => {
-      if (url.includes('/login') || url.includes('saml') || url.includes('duosecurity')) return;
-
-      try {
-        const urlObj = new URL(url);
-        if (urlObj.pathname === '/' || urlObj.searchParams.has('login_success')) {
-          const cookies = await session.defaultSession.cookies.get({ url: urlObj.origin });
-          const canvasSessionCookie = cookies.find(c => c.name === 'canvas_session');
-
-          if (canvasSessionCookie) {
-            loginSucceeded = true;
-            clearTimeout(loginTimeout);
-            loginWin.close();
-            event.reply('canvas-login-success');
-          }
-        }
-      } catch (err) {
-        console.error('Failed to extract cookie:', err);
-      }
+    loginWin.loadURL(loginUrl).catch((error) => {
+      console.error('[login] Failed to load Canvas URL:', error);
+      closeReason = 'load-failed';
+      if (!loginWin.isDestroyed()) loginWin.close();
     });
   });
 
   // One-shot fetch (initial load + manual refresh)
-  ipcMain.handle('fetch-canvas-data', async (_event, schoolUrl) => {
+  ipcMain.handle('fetch-canvas-data', async (_event, schoolUrl, trackedTasks) => {
     try {
-      const data = await fetchCanvasDataInternal(schoolUrl);
+      const data = await fetchCanvasDataInternal(schoolUrl, trackedTasks);
       _event.sender.send('canvas-fetch-occurred', Date.now());
       return data;
     } catch (err) {
@@ -743,20 +705,62 @@ function registerIpcAndSessionHandlers() {
       if (err.message === 'no_cookie' || err.message === 'decrypt_failed' || err.message === 'unauthorized') {
         throw err;
       }
-      return [];
+      throw err;
     }
   });
 
   // Renderer calls this once after auth — Main takes over all future polling
-  ipcMain.on('start-canvas-polling', (_event, schoolUrl) => {
+  ipcMain.on('start-canvas-polling', (_event, schoolUrl, trackedTasks) => {
     if (!mainWindow) return;
     console.log(`[poll] Starting main-process polling for ${schoolUrl}`);
-    startPolling(schoolUrl, mainWindow.webContents);
+    startPolling(schoolUrl, mainWindow.webContents, trackedTasks);
   });
 
   // ─── LLM IPC Handlers ───────────────────────────────────────────────────────
   const LLM_MODEL = 'qwen2.5:3b';
   const OLLAMA_API = 'http://127.0.0.1:11434/api';
+
+  ipcMain.handle('ollama-version', async () => {
+    const res = await net.fetch(`${OLLAMA_API}/version`);
+    if (!res.ok) throw new Error('Ollama version check failed');
+    return res.json();
+  });
+
+  ipcMain.handle('ollama-tags', async () => {
+    const res = await net.fetch(`${OLLAMA_API}/tags`);
+    if (!res.ok) throw new Error('Ollama model check failed');
+    return res.json();
+  });
+
+  ipcMain.handle('ollama-pull', async (event, model = LLM_MODEL) => {
+    const res = await net.fetch(`${OLLAMA_API}/pull`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: model })
+    });
+    if (!res.ok || !res.body) throw new Error('Ollama model download failed');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      pending += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = pending.split('\n');
+      pending = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const progress = JSON.parse(line);
+        if (!event.sender.isDestroyed() && progress.total && progress.completed) {
+          event.sender.send('ollama-pull-progress', Math.round((progress.completed / progress.total) * 100));
+        }
+      }
+      if (done) break;
+    }
+    return { ready: true };
+  });
 
   ipcMain.handle('llm-chat', async (event, messages) => {
     try {
@@ -868,7 +872,7 @@ function registerPowerMonitorHandlers() {
   let reEmbedTimeout = null;
 
   powerMonitor.on('suspend', () => {
-    console.log('[power] System suspend detected. Detaching widget...');
+    console.log('[power] System suspend detected. Preparing desktop widget...');
     if (reEmbedTimeout) {
       clearTimeout(reEmbedTimeout);
       reEmbedTimeout = null;
@@ -879,7 +883,7 @@ function registerPowerMonitorHandlers() {
   });
 
   powerMonitor.on('lock-screen', () => {
-    console.log('[power] Screen lock detected. Detaching widget...');
+    console.log('[power] Screen lock detected. Preparing desktop widget...');
     if (reEmbedTimeout) {
       clearTimeout(reEmbedTimeout);
       reEmbedTimeout = null;
@@ -891,7 +895,7 @@ function registerPowerMonitorHandlers() {
 
   const reEmbed = () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      console.log('[power] Re-embedding existing widget into WorkerW...');
+      console.log('[power] Restoring desktop widget integration...');
       embedInDesktop(mainWindow);
     } else {
       console.log('[power] Widget destroyed during power cycle. Re-creating...');
@@ -917,6 +921,10 @@ function registerPowerMonitorHandlers() {
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
 app.commandLine.appendSwitch('enable-transparent-visuals');
+if (process.platform === 'linux' && process.env.CANVAS_SIDEKICK_NATIVE_WAYLAND !== '1') {
+  // X11/XWayland permits widget positioning and EWMH desktop-layer hints.
+  app.commandLine.appendSwitch('ozone-platform', 'x11');
+}
 
 app.whenReady().then(() => {
   registerIpcAndSessionHandlers();

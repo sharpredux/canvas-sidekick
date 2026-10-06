@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-export default function ScheduleSettings({ onManualRefresh, currentSize, onSizeChange, lastRefreshTime }) {
+export default function ScheduleSettings({ onManualRefresh, currentSize, onSizeChange, currentTextSize, onTextSizeChange, lastRefreshTime }) {
   const [refreshing, setRefreshing] = useState(false);
   const [launchOnStartup, setLaunchOnStartup] = useState(false);
   const [minutesAgo, setMinutesAgo] = useState(null);
@@ -50,7 +50,7 @@ export default function ScheduleSettings({ onManualRefresh, currentSize, onSizeC
   const activeIndex = sizes.indexOf(currentSize) >= 0 ? sizes.indexOf(currentSize) : 0;
 
   return (
-    <div style={{
+    <div className="schedule-settings" style={{
       width: '100%', height: '100%', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', padding: '4px', gap: '12px'
     }}>
       <div style={{
@@ -95,6 +95,17 @@ export default function ScheduleSettings({ onManualRefresh, currentSize, onSizeC
         flexDirection: 'column',
         gap: '12px'
       }}>
+        {onTextSizeChange && (
+          <label className="text-size-setting">
+            <span style={{ font: 'var(--md-sys-typescale-label-large)' }}>Text size</span>
+            <select aria-label="Text size" value={currentTextSize} onChange={event => onTextSizeChange(event.target.value)}>
+              <option value="Standard">Standard (100%)</option>
+              <option value="Larger">Larger (112.5%)</option>
+              <option value="Largest">Largest (125%)</option>
+            </select>
+          </label>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <span style={{ font: 'var(--md-sys-typescale-label-large)', color: '#FFFFFF' }}>

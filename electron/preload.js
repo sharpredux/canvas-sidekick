@@ -1,13 +1,22 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  platform: process.platform,
   closeApp:    () => ipcRenderer.send('close-app'),
   minimizeApp: () => ipcRenderer.send('minimize-app'),
-  fetchCanvasData: (url) => ipcRenderer.invoke('fetch-canvas-data', url),
+  fetchCanvasData: (url, trackedTasks = []) => ipcRenderer.invoke('fetch-canvas-data', url, trackedTasks),
   loginCanvas: (url) => ipcRenderer.send('open-canvas-login', url),
-  onCanvasLoginSuccess: (callback) => ipcRenderer.on('canvas-login-success', () => callback()),
-  onCanvasLoginFailed: (callback) => ipcRenderer.on('canvas-login-failed', (_event, reason) => callback(reason)),
-  startCanvasPolling: (url) => ipcRenderer.send('start-canvas-polling', url),
+  onCanvasLoginSuccess: (callback) => {
+    const listener = (_event, authenticatedUrl) => callback(authenticatedUrl);
+    ipcRenderer.on('canvas-login-success', listener);
+    return () => ipcRenderer.removeListener('canvas-login-success', listener);
+  },
+  onCanvasLoginFailed: (callback) => {
+    const listener = (_event, reason) => callback(reason);
+    ipcRenderer.on('canvas-login-failed', listener);
+    return () => ipcRenderer.removeListener('canvas-login-failed', listener);
+  },
+  startCanvasPolling: (url, trackedTasks = []) => ipcRenderer.send('start-canvas-polling', url, trackedTasks),
   onCanvasDataUpdate: (cb) => {
     const listener = (event, data) => cb(data);
     ipcRenderer.on('canvas-data-update', listener);
@@ -31,6 +40,15 @@ contextBridge.exposeInMainWorld('api', {
   saveSchedule: (rawText) => ipcRenderer.send('save-schedule', rawText),
   loadSchedule: () => ipcRenderer.invoke('load-schedule'),
   resizeWindow: (sizeName) => ipcRenderer.send('resize-window', sizeName),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  ollamaVersion: () => ipcRenderer.invoke('ollama-version'),
+  ollamaTags: () => ipcRenderer.invoke('ollama-tags'),
+  ollamaPull: (model) => ipcRenderer.invoke('ollama-pull', model),
+  onOllamaPullProgress: (callback) => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on('ollama-pull-progress', listener);
+    return () => ipcRenderer.removeListener('ollama-pull-progress', listener);
+  },
   llmChat: (messages) => ipcRenderer.invoke('llm-chat', messages),
   llmParseCommand: (userInput) => ipcRenderer.invoke('llm-parse-command', userInput),
   llmEstimateTask: (taskTitle, deadline) => ipcRenderer.invoke('llm-estimate-task', taskTitle, deadline),
