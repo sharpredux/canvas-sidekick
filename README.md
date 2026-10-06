@@ -9,6 +9,10 @@ Canvas Sidekick is a compact desktop widget for Canvas LMS assignments, announce
 
 On Linux, the widget remains interactive while requesting the standard EWMH `below`, `sticky`, `skip taskbar`, and `skip pager` states. Native Wayland does not allow applications to control their global position or stacking, so Linux launches through X11/XWayland by default. Set `CANVAS_SIDEKICK_NATIVE_WAYLAND=1` to opt out and use normal Wayland window behavior.
 
+X11/XWayland windows use a native rounded shape before their first visible frame.
+Corners stay rounded when changing widget size, including on desktops with
+compositing disabled. Native Wayland uses the renderer's rounded transparency.
+
 ## Run from source
 
 Requirements:
@@ -87,3 +91,7 @@ Linux graphical session. They use isolated temporary application data and mocked
 Canvas/Ollama services. Set `WIDGET_DISPLAY_SCALE=1.25` or `1.5` to check fractional
 display scaling; set `WIDGET_EXECUTABLE` to an unpacked or installed Linux executable
 to test the packaged app. Screenshots are saved in the temporary test directory.
+
+Run `npm run test:widget-corners` in an X11 graphical session to check the actual
+native corner cutouts on cold launches, resizing, and reloads. It also supports
+`WIDGET_DISPLAY_SCALE` and `WIDGET_EXECUTABLE` and uses isolated application data.

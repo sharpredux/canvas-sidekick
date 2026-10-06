@@ -1,7 +1,7 @@
 {
   "name": "canvas-sidekick",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A desktop Canvas LMS agenda and local AI study assistant.",
   "author": {
     "name": "sharpredux",
@@ -13,6 +13,7 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "test:widget-ui": "npm run build && node tests/verify-widget-ui.js",
+    "test:widget-corners": "npm run build && node tests/verify-widget-corners.js",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",

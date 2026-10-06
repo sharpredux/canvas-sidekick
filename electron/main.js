@@ -5,6 +5,7 @@ import fs from 'fs';
 import { applyLinuxDesktopHints, getLinuxStartupStatus, setLinuxStartupStatus } from './linux.js';
 import { normalizeSettings, mergeSettings, getWindowSize, fitWindowBounds } from './widgetPreferences.js';
 import { fetchPaginatedCanvasData as fetchCanvasPages, mapCanvasTasks } from './canvasTasks.js';
+import { applyWidgetWindowShape } from './windowShape.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -427,13 +428,14 @@ function createWindow() {
     height: size.height,
     ...linuxPosition,
     frame: false,
+    show: false,
     transparent: true,
+    backgroundColor: '#00000000',
     hasShadow: false,
     minimizable: false,
     maximizable: false,
     resizable: false,
     skipTaskbar: true,
-    paintWhenInitiallyHidden: false, // Don't waste GPU compositing before first show
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -444,17 +446,27 @@ function createWindow() {
     }
   });
 
+  const windowInstance = mainWindow;
+  const updateShape = () => applyWidgetWindowShape(windowInstance);
+  updateShape();
+  windowInstance.on('resize', updateShape);
+  screen.on('display-metrics-changed', updateShape);
+  windowInstance.once('closed', () => screen.removeListener('display-metrics-changed', updateShape));
+
+  // Shape the native window before its first visible frame so startup never
+  // exposes a rectangular surface, even without desktop compositing.
+  windowInstance.once('ready-to-show', () => {
+    updateShape();
+    windowInstance.show();
+    embedInDesktop(windowInstance);
+  });
+
   const isDev = process.env.NODE_ENV === 'development';
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
-
-  // Embed window into desktop shell (Rainmeter-style) once content has loaded
-  mainWindow.webContents.once('did-finish-load', () => {
-    embedInDesktop(mainWindow);
-  });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://') || url.startsWith('http://')) {
