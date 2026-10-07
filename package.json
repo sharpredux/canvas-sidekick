@@ -1,7 +1,7 @@
 {
   "name": "canvas-sidekick",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A desktop Canvas LMS agenda and local AI study assistant.",
   "author": {
     "name": "sharpredux",

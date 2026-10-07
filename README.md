@@ -45,6 +45,11 @@ Medium is the default. Small uses tighter spacing and hides secondary previews;
 Large provides wider cards and more visible content. Windows retains its original sizes.
 Linux windows fit within the display work area, including when changing size near an edge.
 
+The Connect to Canvas screen scales its logo, typography, controls, and spacing with
+the selected widget size, while respecting the Linux text-size preference. The URL
+field uses two-thirds of the form width and the login button uses 28.8% (60% narrower
+than before). The close button stays in the top-right corner at every size.
+
 The Linux **Text size** setting is independent of window size: Standard (100%, the
 default), Larger (112.5%), or Largest (125%). Both preferences survive restarts.
 Linux uses local Noto Sans / DejaVu Sans fonts and 100% application zoom, allowing

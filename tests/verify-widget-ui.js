@@ -64,7 +64,7 @@ try {
   await page.evaluate(() => window.api.saveSettings({ schoolUrl: 'https://canvas.mock' }));
   await page.reload();
   await page.locator('.agenda-item').first().waitFor();
-  assert.equal(await application.evaluate(({ app }) => app.getVersion()), '0.1.6');
+  assert.equal(await application.evaluate(({ app }) => app.getVersion()), '0.1.7');
   assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomFactor()), 1);
 
   for (const [size, dimensions] of Object.entries(LINUX_SIZES)) {
@@ -139,11 +139,86 @@ try {
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   assert.equal(await page.getByRole('combobox', { name: 'Text size' }).inputValue(), 'Largest');
   assert.equal((await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds())).width, 480);
-  // Exercise the unauthenticated screen at the smallest size and largest text.
-  await page.evaluate(() => { window.api.saveSettings({ size: 'Small', schoolUrl: '' }); window.api.resizeWindow('Small'); });
+  // Exercise login independently of Canvas, including the pending/error/success states.
+  await application.evaluate(({ ipcMain }) => {
+    ipcMain.removeAllListeners('open-canvas-login');
+    ipcMain.on('open-canvas-login', (_event, url) => { globalThis.widgetTestLoginUrl = url; });
+    ipcMain.removeAllListeners('close-app');
+    ipcMain.on('close-app', () => { globalThis.widgetTestClosed = true; });
+  });
+  const standardLoginSizes = [];
+  for (const size of Object.keys(LINUX_SIZES)) {
+    for (const textSize of Object.keys(TEXT_SCALES)) {
+      await page.evaluate(({ size, textSize }) => {
+        window.api.saveSettings({ size, textSize, schoolUrl: '' });
+        window.api.resizeWindow(size);
+      }, { size, textSize });
+      await page.waitForFunction(async ({ size, textSize }) => {
+        const settings = await window.api.loadSettings();
+        return settings.size === size && settings.textSize === textSize && settings.schoolUrl === '';
+      }, { size, textSize });
+      await page.reload();
+      await page.getByRole('heading', { name: 'Connect to Canvas' }).waitFor();
+      const label = `login/${size}/${textSize} at display scale ${scale}`;
+      await assertLayout(page, label);
+      const geometry = await page.evaluate(() => {
+        const modal = document.querySelector('.auth-modal');
+        const rect = selector => {
+          const { x, y, width, height, right, bottom } = modal.querySelector(selector).getBoundingClientRect();
+          return { x, y, width, height, right, bottom };
+        };
+        return {
+          viewport: { width: innerWidth, height: innerHeight },
+          close: rect('.auth-close'), logo: rect('.auth-logo'),
+          form: rect('.auth-form'), input: rect('.auth-url'), button: rect('.auth-login'),
+          titleSize: parseFloat(getComputedStyle(modal.querySelector('.auth-title')).fontSize)
+        };
+      });
+      assert.ok(Math.abs(geometry.input.width / geometry.form.width - 2 / 3) < 0.005, `${label}: URL width`);
+      assert.ok(Math.abs(geometry.button.width / geometry.form.width - 0.288) < 0.005, `${label}: button width`);
+      assert.ok(geometry.close.x > geometry.viewport.width * 0.8, `${label}: close at right edge`);
+      assert.ok(geometry.close.y < 25, `${label}: close at top edge`);
+      assert.ok(geometry.close.bottom < geometry.logo.y, `${label}: close clear of logo`);
+      for (const element of [geometry.close, geometry.logo, geometry.input, geometry.button]) {
+        assert.ok(element.y >= 0 && element.bottom <= geometry.viewport.height, `${label}: visible vertically`);
+      }
+      if (textSize === 'Standard') standardLoginSizes.push({ logo: geometry.logo.width, title: geometry.titleSize, button: geometry.button.height });
+      const input = page.getByRole('textbox', { name: 'Canvas URL' });
+      const login = page.getByRole('button', { name: 'Log in', exact: true });
+      assert.equal(await login.isDisabled(), true);
+      await input.fill('canvas.example.edu');
+      await login.click();
+      const waiting = page.getByRole('button', { name: 'Waiting...', exact: true });
+      await waiting.waitFor();
+      assert.equal(await input.isDisabled(), true);
+      assert.equal(await waiting.isDisabled(), true);
+      assert.equal(await application.evaluate(() => globalThis.widgetTestLoginUrl), 'https://canvas.example.edu');
+      assert.equal(await waiting.evaluate(element => element.scrollWidth <= element.clientWidth), true, `${label}: pending label fits`);
+      await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('canvas-login-failed', 'invalid-url'));
+      await page.getByRole('alert').waitFor();
+      assert.equal(await input.getAttribute('aria-invalid'), 'true');
+      assert.equal(await input.isDisabled(), false);
+      await assertLayout(page, `${label}/error`);
+      if (textSize === 'Largest') await page.screenshot({ path: path.join(userData, `${size}-login-${scale}.png`) });
+      await input.fill('canvas.retry.edu');
+      await page.getByRole('alert').waitFor({ state: 'hidden' });
+      await page.getByRole('button', { name: 'Log in', exact: true }).click();
+      await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('canvas-login-success', 'https://canvas.mock'));
+      await page.getByRole('status').filter({ hasText: 'Authenticated Successfully!' }).waitFor();
+      await page.locator('.auth-modal').waitFor({ state: 'hidden' });
+      console.log(`PASS: ${label}, placement, widths, pending, error, and success`);
+    }
+  }
+  for (let i = 1; i < standardLoginSizes.length; i++) {
+    for (const property of ['logo', 'title', 'button']) {
+      assert.ok(standardLoginSizes[i][property] > standardLoginSizes[i - 1][property], `login ${property} must grow with widget size`);
+    }
+  }
+  await page.evaluate(() => window.api.saveSettings({ schoolUrl: '' }));
+  await page.waitForFunction(async () => (await window.api.loadSettings()).schoolUrl === '');
   await page.reload();
-  await page.getByRole('button', { name: 'Log in', exact: true }).scrollIntoViewIfNeeded();
-  await assertLayout(page, 'login');
+  await page.getByRole('button', { name: 'Close Canvas Sidekick', exact: true }).click();
+  assert.equal(await application.evaluate(() => globalThis.widgetTestClosed), true);
   assert.deepEqual(errors, []);
   console.log(`PASS: persistence, fullscreen recovery, and login. Screenshots: ${userData}`);
 } finally {

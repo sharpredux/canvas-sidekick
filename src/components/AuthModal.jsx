@@ -81,104 +81,55 @@ export default function AuthModal({ onAuthenticated, defaultSchoolUrl = '' }) {
   };
 
   return (
-    <div className="auth-modal" style={{
-      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-      background: '#000000',
-      zIndex: 100, display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center', padding: '12px',
-      textAlign: 'center', boxSizing: 'border-box',
-      borderRadius: 'var(--md-sys-shape-corner-extra-large)'
-    }}>
-      <div style={{
-        color: 'var(--md-sys-color-primary)', /* Vibrant Cyan */
-        marginBottom: '4px',
-        transform: 'translateY(-4px)'
-      }}>
-        {/* Close Button Top Right */}
-        <button 
-          className="close-btn" 
-          onClick={closeApp}
-          style={{ position: 'absolute', top: '16px', right: '16px' }}
-        >
-          <svg width="14" height="14" viewBox="0 -960 960 960" fill="currentColor">
-            <path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/>
-          </svg>
-        </button>
+    <div className="auth-modal">
+      <button
+        type="button"
+        className="close-btn auth-close"
+        aria-label="Close Canvas Sidekick"
+        onClick={closeApp}
+      >
+        <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true">
+          <path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/>
+        </svg>
+      </button>
 
-        {/* Simplified Watch-style Icon */}
-        <svg width="32" height="32" viewBox="0 -960 960 960" fill="currentColor">
+      <div className="auth-content">
+        <svg className="auth-logo" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true">
           <path d="M480-120 200-272v-240L40-600l440-240 440 240-160 88v240L480-120Zm0-332 274-148-274-148-274 148 274 148Zm0 241 200-108v-151L480-360 280-470v151l200 108Zm0-241Zm0 90Zm0 0Z"/>
         </svg>
+        <h2 className="auth-title">Connect to Canvas</h2>
+
+        {status === 'success' ? (
+          <div className="auth-success" role="status">Authenticated Successfully!</div>
+        ) : (
+          <form className="auth-form" onSubmit={handleLogin}>
+            <input
+              className="auth-url"
+              type="text"
+              aria-label="Canvas URL"
+              aria-invalid={Boolean(loginError)}
+              aria-describedby={loginError ? 'canvas-login-error' : undefined}
+              placeholder="canvas.edu"
+              value={schoolUrl}
+              onChange={(e) => { setSchoolUrl(e.target.value); setLoginError(null); }}
+              required
+              disabled={status === 'authenticating'}
+            />
+            {loginError && (
+              <span className="auth-error" id="canvas-login-error" role="alert">
+                {loginError}
+              </span>
+            )}
+            <button
+              className="auth-login"
+              type="submit"
+              disabled={status === 'authenticating' || !schoolUrl}
+            >
+              {status === 'authenticating' ? 'Waiting...' : 'Log in'}
+            </button>
+          </form>
+        )}
       </div>
-
-      <h2 style={{
-        font: 'var(--md-sys-typescale-title-small)',
-        margin: '0 0 20px 0',
-        transform: 'translateY(-4px)'
-      }}>
-        Connect to Canvas
-      </h2>
-
-      {status === 'success' ? (
-        <div style={{ font: 'var(--md-sys-typescale-label-large)', color: 'var(--md-sys-color-primary)' }}>
-          Authenticated Successfully!
-        </div>
-      ) : (
-        <form onSubmit={handleLogin} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <input 
-            type="text" 
-            placeholder="canvas.edu" 
-            value={schoolUrl}
-            onChange={(e) => { setSchoolUrl(e.target.value); setLoginError(null); }}
-            required
-            disabled={status === 'authenticating'}
-            style={{
-              width: '100%',
-              padding: '10px',
-              borderRadius: 'var(--md-sys-shape-corner-full)',
-              border: loginError ? '2px solid var(--md-sys-color-error)' : 'none',
-              background: 'var(--md-sys-color-surface-container-high)',
-              color: '#FFFFFF',
-              font: 'var(--md-sys-typescale-label-medium)',
-              boxSizing: 'border-box',
-              textAlign: 'center',
-              outline: loginError ? '0' : undefined,
-              transition: 'border 0.2s ease'
-            }}
-          />
-
-          {/* Error message */}
-          {loginError && (
-            <span style={{
-              color: 'var(--md-sys-color-error)',
-              font: 'var(--md-sys-typescale-label-small)',
-              marginTop: '-2px'
-            }}>
-              {loginError}
-            </span>
-          )}
-
-          <button 
-            type="submit"
-            disabled={status === 'authenticating' || !schoolUrl}
-            style={{
-              background: 'var(--md-sys-color-primary-container)', /* Neon Green */
-              color: '#000000', /* Maximum contrast */
-              border: 'none',
-              padding: '8px 12px',
-              borderRadius: 'var(--md-sys-shape-corner-full)',
-              font: 'var(--md-sys-typescale-label-medium)',
-              fontWeight: 600,
-              cursor: (status === 'authenticating' || !schoolUrl) ? 'default' : 'pointer',
-              opacity: (status === 'authenticating' || !schoolUrl) ? 0.7 : 1,
-              width: '72%',
-              alignSelf: 'center'
-            }}
-          >
-            {status === 'authenticating' ? 'Waiting...' : 'Log in'}
-          </button>
-        </form>
-      )}
     </div>
   );
 }
