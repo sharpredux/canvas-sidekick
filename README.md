@@ -1,6 +1,6 @@
 # Canvas Sidekick — Rust rebuild
 
-This is the native Rust implementation candidate for Canvas Sidekick 0.1.7. The requirement is the same features, appearance, and interactions as Electron, with the user's explicit exception allowing the candidate's current glassy edge finish and widget curvature. There are no added product features. It stays alongside the existing app until the checks in [PARITY.md](PARITY.md) pass. Capturing screenshots does not mean visual parity has passed.
+This is the native Rust implementation candidate for Canvas Sidekick 0.1.7. The requirement is the same features, appearance, and interactions as Electron, with the user's explicit exception allowing the candidate's current glassy edge finish and widget curvature. There are no added product features. The user explicitly requested replacing the standalone Electron installation on this Linux machine; the remaining cross-platform checks are recorded in [PARITY.md](PARITY.md). Capturing screenshots does not mean visual parity has passed.
 
 The frozen reference is commit `ae211ff98ac374685e94ad81c8ff905d9cb285f4` plus the captured working-tree patch in `baseline/`. `baseline/manifest.json` records hashes; `baseline/reference/` contains the original source. The original Sidekick checkout and installed profile are unchanged. Command Center has an opt-in native adapter; its original main file is saved in `baseline/command-center-main.cjs`.
 
@@ -48,5 +48,7 @@ On Windows, run `tools/package-windows.ps1` with Rust, Python, NSIS and the WebV
 
 Command Center has an explicit candidate packaging configuration at `integrations/command-center/electron-builder-native.cjs`. Build the Rust release first, run `python3 tools/integrate-command-center.py`, then run Electron Builder from the Command Center directory with that configuration. Candidate output goes to this repository's `artifacts/command-center-package/`; its ordinary build configuration and default Electron route remain unchanged. `node tools/command-center-gate.mjs --packaged PATH` checks the actual candidate AppImage with isolated data.
 
-Windows WorkerW, Show Desktop, and sleep/lock recovery validation remain pending by explicit user choice. No final cutover or Windows replacement is claimed.
+The local Linux standalone app is installed at `~/.local/opt/canvas-sidekick-rust/`, with `~/.local/bin/canvas-sidekick` and the application/startup entries pointing to it. The user's 165 saved tasks and protected Canvas session were migrated before uninstalling the Electron RPM and deleting its release builds. The original Electron profile and source checkout remain available. Command Center's native route remains opt-in.
+
+Windows WorkerW, Show Desktop, and sleep/lock recovery validation remain pending by explicit user choice. No Windows replacement or complete cross-platform acceptance is claimed.
 
