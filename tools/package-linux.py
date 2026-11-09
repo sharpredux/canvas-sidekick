@@ -99,12 +99,14 @@ def main():
         filesystem=temporary/'app.squashfs'
         run(squash,appdir,filesystem,'-noappend','-all-root','-comp','gzip','-processors','1','-no-progress')
         image=output/f'Canvas-Sidekick-Rust-{version}-x86_64.AppImage'
-        with image.open('wb') as stream:
+        assembled=temporary/image.name
+        with assembled.open('wb') as stream:
             stream.write(runtime.read_bytes())
             with filesystem.open('rb') as payload:shutil.copyfileobj(payload,stream)
-        image.chmod(0o755)
-        offset=int(run(image,'--appimage-offset',capture_output=True,text=True).stdout.strip())
+        assembled.chmod(0o755)
+        offset=int(run(assembled,'--appimage-offset',capture_output=True,text=True).stdout.strip())
         assert offset==runtime.stat().st_size, (offset,runtime.stat().st_size)
+        os.replace(assembled,image)
         # Exclude AppImage-specific root entries from the RPM payload.
         top=temporary/'rpmbuild';top.mkdir();spec=top/'candidate.spec'
         put(spec,f'''Name: canvas-sidekick-rust
@@ -135,6 +137,8 @@ cp -a "{appdir}/usr" %{{buildroot}}/
         rpm=next((top/'RPMS').rglob('*.rpm'));package=output/rpm.name;shutil.copy2(rpm,package)
         run('rpm','-qpl',package,stdout=subprocess.DEVNULL)
         record={'version':version,'status':'candidate; Windows and visual acceptance pending',
+                'sourceCommit':run('git','rev-parse','HEAD',capture_output=True,text=True).stdout.strip(),
+                'sourceDirty':bool(run('git','status','--porcelain',capture_output=True,text=True).stdout.strip()),
                 'platform':platform.platform(),
                 'runtimeDependencies':['GTK3','WebKitGTK 4.1','secret-tool','OpenGL/EGL','X11 or XWayland'],
                 'artifacts':[{ 'file':file.name,'bytes':file.stat().st_size,'sha256':hashlib.sha256(file.read_bytes()).hexdigest()} for file in [image,package]]}

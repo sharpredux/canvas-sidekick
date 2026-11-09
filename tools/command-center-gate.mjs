@@ -19,11 +19,17 @@ const attributes=['service','canvas-sidekick-rust','profile',profile];
 const session={origin,cookies:[{name:'canvas_session',value:'synthetic',domain:'127.0.0.1',path:'/',httpOnly:true}]};
 assert.equal(spawnSync('secret-tool',['store','--label=Sidekick real host test',...attributes],{input:JSON.stringify(session)}).status,0);
 let app;
+const packagedIndex=process.argv.indexOf('--packaged');
+const packaged=packagedIndex>=0?path.resolve(process.argv[packagedIndex+1]):null;
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function eventually(predicate,label){for(let attempt=0;attempt<100;attempt++){if(await predicate())return;await wait(100);}throw new Error(label);}
 try{
- app=await _electron.launch({executablePath:require('electron'),args:[path.join(root,'tools/command-center-gate.cjs')],env:{...process.env,COMMAND_CENTER_TEST_DATA:path.join(temporary,'host'),CANVAS_SIDEKICK_RUST:'1',CANVAS_SIDEKICK_PROFILE:profile,CANVAS_SIDEKICK_EXECUTABLE:path.join(root,'target/debug/canvas-sidekick'),CANVAS_SIDEKICK_OLLAMA_URL:origin+'/api',CANVAS_SIDEKICK_TEST_AUTOSTART_DIR:path.join(temporary,'autostart')}});
- const page=await app.firstWindow();await page.locator('[data-route="Tasks"]').waitFor();
+ const env={...process.env,COMMAND_CENTER_TEST_DATA:path.join(temporary,'host'),CANVAS_SIDEKICK_RUST:'1',CANVAS_SIDEKICK_PROFILE:profile,CANVAS_SIDEKICK_OLLAMA_URL:origin+'/api',CANVAS_SIDEKICK_TEST_AUTOSTART_DIR:path.join(temporary,'autostart')};
+ if(packaged)delete env.CANVAS_SIDEKICK_EXECUTABLE;else env.CANVAS_SIDEKICK_EXECUTABLE=path.join(root,'target/debug/canvas-sidekick');
+ app=await _electron.launch({executablePath:packaged||require('electron'),args:packaged?[]:[path.join(root,'tools/command-center-gate.cjs')],env});
+ const page=await app.firstWindow();
+ if(packaged)await app.evaluate(({net})=>Object.defineProperty(net,'fetch',{value:async()=>{throw new Error('External provider disabled in the packaged host test.');}}));
+ await page.locator('[data-route="Tasks"]').waitFor();
  const errors=[];page.on('pageerror',error=>errors.push(error.message));
  const parent=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().find(w=>w.getTitle()==='Command Center').getNativeWindowHandle().readUInt32LE(0));
  const child=()=>{const result=spawnSync('python3',[path.join(root,'tools/query-native-child.py'),String(parent)],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);return JSON.parse(result.stdout);};
@@ -45,5 +51,5 @@ try{
  assert.deepEqual(errors,[]);
  await app.close();app=null;
  await eventually(()=>spawnSync('python3',['-c','import fcntl,sys; f=open(sys.argv[1],"r+"); fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)',path.join(profile,'profile.lock')]).status===0,'Native child kept its profile locked after Command Center quit');
- console.log('PASS: actual Command Center navigation, native child, checkbox sync, resize, hide and shutdown; isolated profiles, no external providers.');
+ console.log(`PASS: ${packaged?'packaged':'actual'} Command Center navigation, native child, checkbox sync, resize, hide and shutdown; isolated profiles, no external providers.`);
 }finally{if(app)await app.close();spawnSync('secret-tool',['clear',...attributes]);await new Promise(resolve=>server.close(resolve));await fs.rm(temporary,{recursive:true,force:true});}

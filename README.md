@@ -1,6 +1,6 @@
 # Canvas Sidekick — Rust rebuild
 
-This is the native Rust implementation candidate for Canvas Sidekick 0.1.7. The requirement is the same features, appearance, and interactions as Electron, with no redesign or added product features. It stays alongside the existing app until the checks in [PARITY.md](PARITY.md) pass. Capturing screenshots does not mean visual parity has passed.
+This is the native Rust implementation candidate for Canvas Sidekick 0.1.7. The requirement is the same features, appearance, and interactions as Electron, with the user's explicit exception allowing the candidate's current glassy edge finish and widget curvature. There are no added product features. It stays alongside the existing app until the checks in [PARITY.md](PARITY.md) pass. Capturing screenshots does not mean visual parity has passed.
 
 The frozen reference is commit `ae211ff98ac374685e94ad81c8ff905d9cb285f4` plus the captured working-tree patch in `baseline/`. `baseline/manifest.json` records hashes; `baseline/reference/` contains the original source. The original Sidekick checkout and installed profile are unchanged. Command Center has an opt-in native adapter; its original main file is saved in `baseline/command-center-main.cjs`.
 
@@ -24,9 +24,10 @@ Sessions use Linux Secret Service or Windows DPAPI. Cookies, including renewal a
 - `python3 tools/login-handoff-gate.py`: full native sign-in → Sidekick assignment handoff.
 - `python3 tools/host-gate.py`: full native host, task roundtrip, real pointer/keyboard input, visibility/resize and shutdown.
 - `node tools/command-center-gate.mjs`: actual Command Center navigation, task-checkbox sync, native resize/visibility and child shutdown.
-- `python3 tools/ui-gate.py --matrix --details` then `node tools/reference-capture.mjs --details --picker`: original tab/size/text-scale combinations plus form, calendar details, schedule import, AI setup and authentication states. The gates verify actual viewport dimensions.
+- `python3 tools/ui-gate.py --matrix --details` then `node tools/reference-capture.mjs --details --picker --year --required`: original tab/size/text-scale combinations plus form, datetime/year/validation popups, calendar details, schedule import, AI setup and authentication states. The gates verify actual viewport dimensions and retain separate standalone/hosted fixtures.
 - Add `--hosted` to both capture commands to compare Command Center's appearance. Add `--medium` to the reference command for a quick single-preset review.
 - `python3 tools/package-smoke.py`: extract the candidate RPM/AppImage and exercise their release windows, migration bridge, dependencies and login helper.
+- `python3 tools/visual-report.py`: generate `artifacts/parity-report/index.html` with Electron/Rust overlays and raw pixel measurements. Approved glass/curvature differences remain visible in these measurements.
 
 Integration scripts require a graphical desktop and unlocked keyring. They use temporary profiles, mock services and synthetic credentials, then clean up their entries. Real DLSU SSO already passed; its temporary session was discarded. Captures go to ignored `artifacts/native/` and `artifacts/reference/`. Additional state and popup comparisons remain necessary.
 
@@ -44,7 +45,7 @@ The Linux AppImage uses system GTK3, WebKitGTK 4.1, `secret-tool`, and graphics 
 
 On Windows, run `tools/package-windows.ps1` with Rust, Python, NSIS and the WebView2 Runtime available. It prepares a per-user installer and a single-file portable wrapper that extracts both native executables together. These recipes have not been built or tested on Windows.
 
-Command Center has an explicit candidate packaging configuration at `integrations/command-center/electron-builder-native.cjs`. Build the Rust release first, run `python3 tools/integrate-command-center.py`, then run Electron Builder from the Command Center directory with that configuration. Candidate output goes to this repository's `artifacts/command-center-package/`; its ordinary build configuration and default Electron route remain unchanged.
+Command Center has an explicit candidate packaging configuration at `integrations/command-center/electron-builder-native.cjs`. Build the Rust release first, run `python3 tools/integrate-command-center.py`, then run Electron Builder from the Command Center directory with that configuration. Candidate output goes to this repository's `artifacts/command-center-package/`; its ordinary build configuration and default Electron route remain unchanged. `node tools/command-center-gate.mjs --packaged PATH` checks the actual candidate AppImage with isolated data.
 
 Windows WorkerW, Show Desktop, and sleep/lock recovery validation remain pending by explicit user choice. No final cutover or Windows replacement is claimed.
 

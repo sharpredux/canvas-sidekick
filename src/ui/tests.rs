@@ -32,7 +32,14 @@ fn setup(custom: bool) -> (tempfile::TempDir, egui::Context, App) {
     let ctx = egui::Context::default();
     let mut fonts = egui::FontDefinitions::default();
     let family = fonts.families[&egui::FontFamily::Proportional].clone();
-    for name in ["regular", "medium", "semibold", "bold"] {
+    for name in [
+        "regular",
+        "medium",
+        "semibold",
+        "bold",
+        "picker-regular",
+        "picker-bold",
+    ] {
         fonts
             .families
             .insert(egui::FontFamily::Name(name.into()), family.clone());
@@ -176,7 +183,7 @@ fn datetime_popup_selects_a_day_hour_minute_period_and_clears() {
     };
     draw(&mut form, vec![]);
     draw(&mut form, vec![]);
-    for (x, y) in [(317., 269.), (261., 269.), (373., 233.), (94., 316.)] {
+    for (x, y) in [(317., 269.), (261., 269.), (373., 269.), (94., 316.)] {
         draw(&mut form, pointer(x, y, true));
         draw(&mut form, pointer(x, y, false));
     }
@@ -185,6 +192,50 @@ fn datetime_popup_selects_a_day_hour_minute_period_and_clears() {
     draw(&mut form, pointer(50., 462., false));
     assert!(form.date.is_empty());
     assert!(!form.picker_open);
+}
+#[test]
+fn datetime_year_list_keeps_the_value_until_a_day_is_chosen() {
+    let (_temp, ctx, _app) = setup(true);
+    let mut form = Form {
+        date: "11/09/2026 07:03 PM".into(),
+        ..Default::default()
+    };
+    form.open_date_picker();
+    form.picker_years = true;
+    form.picker_expanded_year = 2026;
+    form.picker_year_scroll = true;
+    let anchor = egui::Rect::from_min_size(egui::pos2(13., 165.), egui::vec2(334., 35.));
+    let mut time = 0.;
+    let mut draw = |form: &mut Form, events| {
+        time += 0.1;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(500., 520.),
+                )),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ctx| form.date_popup(ctx, anchor),
+        );
+    };
+    draw(&mut form, vec![]);
+    draw(&mut form, vec![]);
+    draw(&mut form, pointer(70., 385., true));
+    draw(&mut form, pointer(70., 385., false));
+    draw(&mut form, vec![]);
+    assert_eq!(form.picker_expanded_year, 2027);
+    draw(&mut form, pointer(92., 312., true));
+    draw(&mut form, pointer(92., 312., false));
+    assert_eq!(form.picker_month, NaiveDate::from_ymd_opt(2027, 2, 1));
+    assert!(!form.picker_years);
+    assert_eq!(form.date, "11/09/2026 07:03 PM");
+    draw(&mut form, vec![]);
+    draw(&mut form, pointer(122., 316., true));
+    draw(&mut form, pointer(122., 316., false));
+    assert_eq!(form.date, "02/10/2027 07:03 PM");
 }
 #[test]
 fn swiping_a_custom_task_reveals_delete_after_release() {

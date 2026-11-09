@@ -5,7 +5,14 @@ use chrono::Timelike;
 fn label(ui: &egui::Ui, rect: egui::Rect, text: &str, size: f32, bold: bool, color: Color32) {
     let font = egui::FontId::new(
         size,
-        egui::FontFamily::Name(if bold { "bold" } else { "regular" }.into()),
+        egui::FontFamily::Name(
+            if bold {
+                "picker-bold"
+            } else {
+                "picker-regular"
+            }
+            .into(),
+        ),
     );
     let galley = ui.fonts_mut(|fonts| fonts.layout_no_wrap(text.into(), font, color));
     ui.painter()
@@ -23,6 +30,8 @@ impl Form {
         self.picker_minute = date.minute();
         self.picker_scroll = true;
         self.picker_years = false;
+        self.picker_expanded_year = self.picker.year();
+        self.picker_year_scroll = false;
         self.picker_open = true;
     }
     fn commit_picker(&mut self) {
@@ -34,11 +43,137 @@ impl Form {
             .to_string();
         self.error = None;
     }
+    fn year_list(&mut self, ui: &mut egui::Ui, popup: egui::Rect, month: NaiveDate) {
+        let viewport =
+            egui::Rect::from_min_size(popup.min + egui::vec2(11., 45.), egui::vec2(180., 227.));
+        let mut list = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("year-list")
+                .max_rect(viewport),
+        );
+        list.set_clip_rect(viewport.intersect(ui.ctx().content_rect()));
+        let expanded = self.picker_expanded_year.clamp(1, 9999);
+        let total = 9999. * 25. + 102.;
+        let mut scroll = egui::ScrollArea::vertical()
+            .id_salt("picker-years")
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .auto_shrink([false, false]);
+        if self.picker_year_scroll {
+            scroll = scroll.vertical_scroll_offset((expanded - 1) as f32 * 25.);
+            self.picker_year_scroll = false;
+        }
+        let mut output = scroll.show_viewport(&mut list, |ui, visible| {
+            let origin = ui.max_rect().min;
+            ui.set_min_size(egui::vec2(180., total));
+            let first = (((visible.top() - 102.).max(0.) / 25.) as i32 + 1).max(1);
+            let last = ((visible.bottom() / 25.) as i32 + 2).min(9999);
+            for year in first..=last {
+                let top = (year - 1) as f32 * 25. + if year > expanded { 102. } else { 0. };
+                let header =
+                    egui::Rect::from_min_size(origin + egui::vec2(0., top), egui::vec2(180., 25.));
+                ui.painter().rect_filled(header, 0, Color32::from_gray(239));
+                ui.painter().hline(
+                    header.x_range(),
+                    header.bottom() - 0.5,
+                    egui::Stroke::new(1_f32, Color32::from_gray(206)),
+                );
+                let text = ui.fonts_mut(|fonts| {
+                    fonts.layout_no_wrap(
+                        year.to_string(),
+                        egui::FontId::new(12., egui::FontFamily::Name("picker-regular".into())),
+                        Color32::BLACK,
+                    )
+                });
+                ui.painter().galley(
+                    header.min + egui::vec2(8., (25. - text.size().y) / 2.),
+                    text,
+                    Color32::BLACK,
+                );
+                if ui
+                    .interact(header, ui.id().with(("year", year)), egui::Sense::click())
+                    .clicked()
+                {
+                    self.picker_expanded_year = year;
+                }
+                if year == expanded {
+                    for index in 0..12 {
+                        let date = NaiveDate::from_ymd_opt(year, index + 1, 1).unwrap();
+                        let rect = egui::Rect::from_min_size(
+                            header.left_bottom()
+                                + egui::vec2((index % 4) as f32 * 45., (index / 4) as f32 * 34.),
+                            egui::vec2(45., 34.),
+                        );
+                        let selected = year == month.year() && index + 1 == month.month();
+                        let response = ui.interact(
+                            rect,
+                            ui.id().with(("month", year, index)),
+                            egui::Sense::click(),
+                        );
+                        if selected {
+                            ui.painter().rect_filled(
+                                rect.shrink(1.),
+                                2,
+                                Color32::from_rgb(0, 117, 255),
+                            );
+                            ui.painter().rect_stroke(
+                                rect.shrink(0.5),
+                                2,
+                                egui::Stroke::new(2_f32, Color32::from_rgb(229, 151, 0)),
+                                egui::StrokeKind::Inside,
+                            );
+                        } else if response.hovered() {
+                            ui.painter().rect_filled(
+                                rect.shrink(1.),
+                                2,
+                                Color32::from_rgba_unmultiplied(0, 117, 255, 77),
+                            );
+                        }
+                        label(
+                            ui,
+                            rect,
+                            &date.format("%b").to_string(),
+                            12.,
+                            selected,
+                            if selected {
+                                Color32::WHITE
+                            } else {
+                                Color32::BLACK
+                            },
+                        );
+                        if response.clicked() {
+                            self.picker_month = Some(date);
+                            self.picker_years = false;
+                        }
+                    }
+                }
+            }
+        });
+        let thumb = egui::Rect::from_min_size(
+            egui::pos2(viewport.right() + 2., viewport.center().y - 12.5),
+            egui::vec2(4., 30.),
+        );
+        ui.painter().rect_filled(thumb, 0, Color32::from_gray(216));
+        let response = ui.interact(
+            thumb.expand2(egui::vec2(5., 0.)),
+            ui.id().with("year-scrubber"),
+            egui::Sense::drag(),
+        );
+        if response.dragged() {
+            output.state.offset.y = (output.state.offset.y + response.drag_delta().y * 25.)
+                .clamp(0., total - viewport.height());
+            output.state.store(ui.ctx(), output.id);
+            ui.ctx().request_repaint();
+        }
+    }
     pub(super) fn date_popup(&mut self, ctx: &egui::Context, anchor: egui::Rect) {
         if !self.picker_open {
             return;
         }
-        let popup = egui::Rect::from_min_size(anchor.left_bottom(), egui::vec2(386., 283.));
+        let popup = egui::Rect::from_min_size(anchor.left_bottom(), egui::vec2(392., 283.));
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && self.picker_years {
+            self.picker_years = false;
+            return;
+        }
         if ctx.input(|i| {
             i.key_pressed(egui::Key::Escape)
                 || i.pointer.any_pressed()
@@ -70,20 +205,38 @@ impl Form {
                     popup.min + egui::vec2(11., 10.),
                     egui::vec2(118., 28.),
                 );
-                let title = if self.picker_years {
-                    month.format("%Y").to_string()
+                let title = month.format("%B %Y").to_string();
+                let caption_color = if self.picker_years {
+                    Color32::from_gray(118)
                 } else {
-                    month.format("%B %Y").to_string()
+                    Color32::BLACK
                 };
-                label(ui, caption, &title, 12., true, Color32::BLACK);
-                let triangle = egui::pos2(caption.right() - 2., caption.center().y);
+                let caption_text = ui.fonts_mut(|fonts| {
+                    fonts.layout_no_wrap(
+                        title,
+                        egui::FontId::new(12., egui::FontFamily::Name("picker-bold".into())),
+                        caption_color,
+                    )
+                });
+                let triangle = egui::pos2(
+                    popup.left() + 12. + caption_text.size().x + 7.,
+                    caption.center().y,
+                );
+                ui.painter().galley(
+                    egui::pos2(
+                        popup.left() + 12.,
+                        caption.center().y - caption_text.size().y / 2.,
+                    ),
+                    caption_text,
+                    caption_color,
+                );
                 ui.painter().add(egui::Shape::convex_polygon(
                     vec![
                         triangle + egui::vec2(-3., -1.),
                         triangle + egui::vec2(3., -1.),
                         triangle + egui::vec2(0., 2.),
                     ],
-                    Color32::BLACK,
+                    caption_color,
                     egui::Stroke::NONE,
                 ));
                 if ui
@@ -91,8 +244,16 @@ impl Form {
                     .clicked()
                 {
                     self.picker_years = !self.picker_years;
+                    if self.picker_years {
+                        self.picker_expanded_year = month.year();
+                        self.picker_year_scroll = true;
+                    }
                 }
-                for (direction, x) in [(-1, 160.), (1, 192.)] {
+                let show_calendar = !self.picker_years;
+                for (direction, x) in [(-1, 160.), (1, 192.)]
+                    .into_iter()
+                    .filter(|_| show_calendar)
+                {
                     let center = popup.min + egui::vec2(x, 24.);
                     let response = ui.interact(
                         egui::Rect::from_center_size(center, egui::vec2(28., 30.)),
@@ -122,36 +283,7 @@ impl Form {
                     }
                 }
                 if self.picker_years {
-                    for index in 0..12 {
-                        let date = month.with_month(index + 1).unwrap();
-                        let rect = egui::Rect::from_min_size(
-                            popup.min
-                                + egui::vec2(
-                                    9. + (index % 3) as f32 * 66.,
-                                    51. + (index / 3) as f32 * 46.,
-                                ),
-                            egui::vec2(66., 42.),
-                        );
-                        label(
-                            ui,
-                            rect,
-                            &date.format("%b").to_string(),
-                            12.,
-                            false,
-                            Color32::BLACK,
-                        );
-                        if ui
-                            .interact(
-                                rect,
-                                ui.id().with(("pick-month", index)),
-                                egui::Sense::click(),
-                            )
-                            .clicked()
-                        {
-                            self.picker_month = Some(date);
-                            self.picker_years = false;
-                        }
-                    }
+                    self.year_list(ui, popup, month);
                 } else {
                     for (index, day) in ["S", "M", "T", "W", "T", "F", "S"].iter().enumerate() {
                         label(
@@ -188,7 +320,7 @@ impl Form {
                             ui.painter().rect_filled(
                                 rect.shrink(1.),
                                 0,
-                                Color32::from_rgb(0, 120, 255),
+                                Color32::from_rgb(0, 117, 255),
                             );
                         } else if response.hovered() {
                             ui.painter()
@@ -198,7 +330,7 @@ impl Form {
                             ui.painter().rect_stroke(
                                 rect.shrink(0.5),
                                 0,
-                                egui::Stroke::new(2_f32, Color32::from_rgb(255, 170, 0)),
+                                egui::Stroke::new(2_f32, Color32::from_rgb(229, 151, 0)),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -223,12 +355,15 @@ impl Form {
                         }
                     }
                 }
-                for (clear, x, text) in [(true, 12., "Clear"), (false, 153., "Today")] {
+                for (clear, x, text) in [(true, 12., "Clear"), (false, 153., "Today")]
+                    .into_iter()
+                    .filter(|_| show_calendar)
+                {
                     let rect = egui::Rect::from_min_size(
                         popup.min + egui::vec2(x, 247.),
                         egui::vec2(52., 30.),
                     );
-                    label(ui, rect, text, 12., false, Color32::from_rgb(0, 120, 255));
+                    label(ui, rect, text, 12., false, Color32::from_rgb(0, 117, 255));
                     if ui
                         .interact(
                             rect,
@@ -285,7 +420,7 @@ impl Form {
                             let value = match column {
                                 0 => (index % 12) as u32,
                                 1 => (index % 60) as u32,
-                                _ => index as u32,
+                                _ => (index as u32 + selected) % 2,
                             };
                             let text = match column {
                                 0 => format!("{:02}", value + 1),
@@ -297,7 +432,7 @@ impl Form {
                             let active = value == selected;
                             if active {
                                 ui.painter()
-                                    .rect_filled(row, 2, Color32::from_rgb(0, 120, 255));
+                                    .rect_filled(row, 2, Color32::from_rgb(0, 117, 255));
                             } else if response.hovered() {
                                 ui.painter().rect_filled(row, 2, Color32::from_gray(235));
                             }

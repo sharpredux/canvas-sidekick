@@ -2,10 +2,14 @@ import {createRequire} from 'node:module';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import {spawnSync} from 'node:child_process';
 const require=createRequire(new URL('../../canvas-sidekick/package.json',import.meta.url));
 const { _electron }=require('playwright');
 const root=path.resolve(import.meta.dirname,'..');
-const fixture=JSON.parse(await fs.readFile(path.join(root,'artifacts/ui/fixture.json'),'utf8'));
+const fixtureDirectory=process.argv.includes('--hosted')?'native-hosted':process.argv.includes('--medium')?'ui':'native';
+let fixture;
+try{fixture=JSON.parse(await fs.readFile(path.join(root,`artifacts/${fixtureDirectory}/fixture.json`),'utf8'));}
+catch(error){if(error.code!=='ENOENT')throw error;fixture=JSON.parse(await fs.readFile(path.join(root,'artifacts/ui/fixture.json'),'utf8'));}
 const profile=await fs.mkdtemp(path.join(os.tmpdir(),'sidekick-visual-reference-'));
 const configuration=path.join(profile,'config.json');
 await fs.writeFile(configuration,JSON.stringify({...fixture,profile,hosted:process.argv.includes('--hosted')}));
@@ -16,8 +20,8 @@ try{
  const page=await app.firstWindow();
  await page.addInitScript(({now})=>{const OriginalDate=Date;globalThis.Date=class extends OriginalDate {constructor(...args){super(...(args.length?args:[now]));}static now(){return new OriginalDate(now).getTime();}};},{now:fixture.now});
  await page.reload();await page.locator('.agenda-item').first().waitFor();
- const sizes=process.argv.includes('--medium')?['Medium']:['Small','Medium','Large'];
- const texts=process.argv.includes('--medium')?['Standard']:['Standard','Larger','Largest'];
+ const sizes=process.argv.includes('--medium')?['Medium']:process.argv.includes('--small')?['Small']:process.argv.includes('--large')?['Large']:['Small','Medium','Large'];
+ const texts=process.argv.includes('--largest')?['Largest']:process.argv.includes('--medium')?['Standard']:['Standard','Larger','Largest'];
  for(const size of sizes)for(const textSize of texts){
   await app.evaluate(()=>{globalThis.sidekickReference.ai='ready';});
   await page.getByRole('button',{name:'Settings',exact:true}).click();
@@ -39,7 +43,8 @@ try{
   if(process.argv.includes('--details')){
    const shot=async name=>{await page.mouse.move(0,0);await page.waitForTimeout(name==='auth-success'?100:200);await page.screenshot({path:path.join(output,`${size}-${textSize}-${name}.png`)});};
    await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.locator('.app-container').hover();await page.locator('.fab').click();await shot('form');
-   if(process.argv.includes('--picker')){const date=page.locator('input[name="date"]');const box=await date.boundingBox();await date.click({position:{x:box.width-20,y:box.height/2}});await shot('form-picker');await page.keyboard.press('Escape');}
+   if(process.argv.includes('--picker')){const date=page.locator('input[name="date"]');const box=await date.boundingBox();await date.click({position:{x:box.width-20,y:box.height/2}});await shot('form-picker');if(process.argv.includes('--year')){const xid=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getNativeWindowHandle().readUInt32LE(0));const clicked=spawnSync('python3',[path.join(root,'tools/x11-click.py'),String(xid),String(box.x+70),String(box.y+box.height+24)]);if(clicked.status!==0)throw new Error(clicked.stderr.toString());await shot('form-year');}await page.keyboard.press('Escape');await page.keyboard.press('Escape');}
+   if(process.argv.includes('--required')){await page.getByRole('button',{name:'Add Task',exact:true}).click();await shot('form-required');await page.keyboard.press('Escape');}
    await page.getByRole('button',{name:'Close',exact:true}).click();
    await page.getByRole('button',{name:'Calendar',exact:true}).click();await page.getByRole('button',{name:'Import',exact:true}).click();await shot('import');
    const schedule='Time Slot\tMon 08/06\tTue 09/06\n7:30AM - 9:00AM\t- CCINOV8 - INNOVATION Offline Venue : Online Teacher : Melvin Gabriel Ignacio Room No :\t- CCINOV8 - INNOVATION Offline Venue : Online Teacher : Melvin Gabriel Ignacio Room No :';
@@ -54,5 +59,5 @@ try{
    await app.evaluate(({BrowserWindow},origin)=>BrowserWindow.getAllWindows()[0].webContents.send('canvas-login-success',origin),fixture.settings.schoolUrl);await page.getByText('Authenticated Successfully!',{exact:true}).waitFor();await shot('auth-success');await page.locator('.auth-modal').waitFor({state:'hidden'});
   }
  }
- console.log(`PASS: ${sizes.length*texts.length*(process.argv.includes('--details')?18:6)} reference screenshots captured from the Electron renderer at verified viewport sizes.`);
+ console.log(`PASS: ${sizes.length*texts.length*(process.argv.includes('--details')?18+Number(process.argv.includes('--picker'))+Number(process.argv.includes('--year'))+Number(process.argv.includes('--required')):6)} reference screenshots captured from the Electron renderer at verified viewport sizes.`);
 }finally{if(app)await app.close();await fs.rm(profile,{recursive:true,force:true});}

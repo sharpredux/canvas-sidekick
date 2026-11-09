@@ -1,6 +1,6 @@
 # Acceptance record
 
-The Electron UI is the specification. Preserve its controls, layouts, states, hover, focus, compact variants, errors, and animations. Do not introduce visual refinements or extra features.
+The Electron UI is the specification. Preserve its controls, layouts, states, hover, focus, compact variants, errors, and animations. The user explicitly approved keeping the Rust candidate's current glassy edge finish and widget curvature. Those two visual differences are accepted; other UI changes and extra features are outside scope.
 
 | Area | Implementation and evidence | Remaining acceptance |
 | --- | --- | --- |
@@ -19,8 +19,8 @@ The Electron UI is the specification. Preserve its controls, layouts, states, ho
 | AI | Ollama status/pull/chat/router/estimator; native keyboard reaches mocked chat | Offline/pull/error/long-chat/action visual review |
 | Linux window | Rounded input, compositor fallback, EWMH states, X11/XWayland default, work-area fitting | Dragging, compositor changes, fractional display-scale review |
 | Native host | Full app parenting, hidden startup, bounds/visibility, task roundtrip, pointer/keyboard and shutdown pass; actual Command Center navigation, checkbox sync, resize/hide/quit pass | Complete hosted visual comparison and final launcher/default switch |
-| Command Center | Opt-in integration; 28 existing tests pass; explicit candidate build configuration includes both executables, migration bridge and notices | Packaged host smoke check |
+| Command Center | Opt-in integration; 28 existing tests pass; candidate AppImage includes both executables, migration bridge and notices; packaged navigation, checkbox sync, resize/hide/quit pass | Final visual acceptance and default switch |
 | Windows | Desktop/power/session hooks, DPAPI, font/zoom/geometry branches implemented | Build/runtime validation; WorkerW, Show Desktop and sleep/lock explicitly pending |
-| Distribution | Linux release RPM/AppImage candidates built and extracted-package launch/helper smoke checks pass; Windows installer/portable recipes prepared | Refresh artifacts after final UI changes; Windows builds/runtime checks; no final release |
+| Distribution | Linux release RPM/AppImage candidates built and extracted-package launch/helper smoke checks pass; Command Center candidate AppImage passes its integration gate; Windows installer/portable recipes prepared | Windows builds/runtime checks; final visual acceptance; no final release |
 
 Do not mark the rebuild complete or replace the installed version while required acceptance work remains. Windows runtime checks stay pending until a machine is available; never represent an unexecuted check as passing.

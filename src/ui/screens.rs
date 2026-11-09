@@ -255,6 +255,21 @@ impl App {
         let animated =
             ui.ctx()
                 .animate_value_with_time(egui::Id::new("tab-position"), self.tab as f32, 0.3);
+        if self.hosted {
+            let pill = egui::Rect::from_min_size(
+                start + egui::vec2(animated * (size + gap), 0.),
+                egui::vec2(size, size),
+            );
+            ui.painter().add(
+                egui::epaint::Shadow {
+                    offset: [0, 2],
+                    blur: 7,
+                    spread: 0,
+                    color: Color32::from_rgba_unmultiplied(0, 107, 95, 24),
+                }
+                .as_shape(pill, size / 2.),
+            );
+        }
         ui.painter().rect_filled(
             egui::Rect::from_min_size(
                 start + egui::vec2(animated * (size + gap), 0.),
@@ -299,9 +314,22 @@ impl App {
                 } else {
                     p.muted
                 });
+            if self.hosted
+                && ui.input(|input| {
+                    input
+                        .pointer
+                        .hover_pos()
+                        .is_some_and(|point| button.contains(point))
+                })
+            {
+                ui.painter()
+                    .rect_filled(button, size / 2., Color32::from_rgb(222, 240, 230));
+            }
             let response = tabs_ui
                 .put(button, egui::Button::image(image).frame(false))
                 .on_hover_text(*label);
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, *label));
             if response.clicked() {
                 self.switch_tab(index);
             }
@@ -486,7 +514,7 @@ impl App {
                 title_color,
                 item.completed,
             );
-            let mut y = py + row + 4. + 2.;
+            let mut y = py + row + if compact { 2. } else { 4. } + 2.;
             let title_height =
                 title.rows.len() as f32 * title_size * if linux { 1.35 } else { 18. / 14. } * scale;
             blocks.push((start + egui::vec2(px, y), title, title_color));
@@ -897,8 +925,15 @@ impl App {
             },
         );
         let open_zoom = zoom_rect.is_some_and(|rect| {
-            ui.interact(rect, ui.id().with(("zoom", &item.id)), egui::Sense::click())
-                .clicked()
+            let rect = if item.is_custom {
+                rect.intersect(wrapper_clip)
+            } else {
+                rect
+            };
+            rect.is_positive()
+                && ui
+                    .interact(rect, ui.id().with(("zoom", &item.id)), egui::Sense::click())
+                    .clicked()
         });
         if open_zoom {
             if let Some(url) = &item.zoom_link {
@@ -949,7 +984,11 @@ impl App {
             courses.sort();
             courses.dedup();
             if !courses.is_empty() {
-                egui::ScrollArea::horizontal()
+                let mut filters = egui::ScrollArea::horizontal()
+                    .scroll_source(egui::scroll_area::ScrollSource {
+                        mouse_wheel: false,
+                        ..Default::default()
+                    })
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     .id_salt("update-courses")
                     .show(ui, |ui| {
@@ -962,16 +1001,16 @@ impl App {
                                 } else {
                                     1.
                                 };
-                                let font = if cfg!(target_os = "linux") {
-                                    12. * scale
-                                } else if self.settings.size == "Small" {
+                                let font = if self.settings.size == "Small" {
                                     8.
+                                } else if cfg!(target_os = "linux") {
+                                    12. * scale
                                 } else {
                                     11.
                                 };
                                 let line = font * 1.4;
                                 let color = if selected {
-                                    p.on_primary
+                                    Color32::BLACK
                                 } else if self.hosted {
                                     p.muted
                                 } else {
@@ -1014,6 +1053,31 @@ impl App {
                             }
                         });
                     });
+                if ui.input(|input| {
+                    input
+                        .pointer
+                        .hover_pos()
+                        .is_some_and(|point| filters.inner_rect.contains(point))
+                }) {
+                    let delta = ui.input_mut(|input| {
+                        let delta = input.raw_scroll_delta;
+                        input.raw_scroll_delta = egui::Vec2::ZERO;
+                        input.smooth_scroll_delta = egui::Vec2::ZERO;
+                        if delta.y != 0. {
+                            -40. * delta.y.signum()
+                        } else {
+                            -delta.x
+                        }
+                    });
+                    if delta != 0. {
+                        filters.state.offset.x = (filters.state.offset.x + delta).clamp(
+                            0.,
+                            (filters.content_size.x - filters.inner_rect.width()).max(0.),
+                        );
+                        filters.state.store(ui.ctx(), filters.id);
+                        ui.ctx().request_repaint();
+                    }
+                }
                 ui.add_space(0.);
             }
             items.retain(|i| {
@@ -1160,7 +1224,8 @@ impl App {
             p.muted,
             false,
         );
-        let track_y = start.y + 12. + label_line + 4. + description.size().y + 12.;
+        let track_y =
+            start.y + 12. + label_line + 4. + description.rows.len() as f32 * body_line + 12.;
         let track_h = meta_line + if linux { 24. } else { 20. } + if self.hosted { 2. } else { 0. };
         let first =
             egui::Rect::from_min_size(start, egui::vec2(width, track_y + track_h + 12. - start.y));
@@ -1204,6 +1269,21 @@ impl App {
         let animated =
             ui.ctx()
                 .animate_value_with_time(egui::Id::new("settings-pill"), index as f32, 0.3);
+        if self.hosted {
+            let pill = egui::Rect::from_min_size(
+                track.min + egui::vec2(track_inset + slot_width * animated, track_inset),
+                egui::vec2(slot_width, track_h - 2. * track_inset),
+            );
+            ui.painter().add(
+                egui::epaint::Shadow {
+                    offset: [0, 2],
+                    blur: 7,
+                    spread: 0,
+                    color: Color32::from_rgba_unmultiplied(0, 107, 95, 24),
+                }
+                .as_shape(pill, 12),
+            );
+        }
         ui.painter().rect_filled(
             egui::Rect::from_min_size(
                 track.min + egui::vec2(track_inset + slot_width * animated, track_inset),
@@ -1281,7 +1361,9 @@ impl App {
             false,
         );
         let text_width = launch_title.size().x.max(launch_sub.size().x);
-        let text_height = launch_title.size().y + 4. + launch_sub.size().y;
+        let text_height = launch_title.rows.len() as f32 * label_line
+            + 4.
+            + launch_sub.rows.len() as f32 * body_line;
         let wrap = text_width + 48. > inner;
         let row_height = text_height + if wrap { 30. } else { 0. };
         let second = egui::Rect::from_min_size(
@@ -1440,11 +1522,22 @@ impl App {
             footer.min + egui::vec2(12., 12.),
             text.size() + egui::vec2(24., 12.),
         );
-        ui.painter().rect_filled(button, 100, p.success);
-        ui.painter()
-            .galley(button.min + egui::vec2(12., 6.), text, Color32::BLACK);
+        let mut sync_painter = ui.painter().clone();
+        if syncing {
+            sync_painter.set_opacity(0.7);
+        }
+        sync_painter.rect_filled(button, 100, p.success);
+        sync_painter.galley(button.min + egui::vec2(12., 6.), text, Color32::BLACK);
         if ui
-            .interact(button, ui.id().with("force-sync"), egui::Sense::click())
+            .interact(
+                button,
+                ui.id().with("force-sync"),
+                if syncing {
+                    egui::Sense::hover()
+                } else {
+                    egui::Sense::click()
+                },
+            )
             .clicked()
             && !syncing
         {
@@ -1480,6 +1573,9 @@ impl App {
         let Some(mut form) = self.form.take() else {
             return;
         };
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            form.error = None;
+        }
         let viewport = ui.ctx().content_rect();
         let linux = cfg!(target_os = "linux");
         let compact = self.settings.size == "Small";
@@ -1579,6 +1675,8 @@ impl App {
                     ))
                     .hint_text(RichText::new(placeholder).color(if index == 3 {
                         p.text
+                    } else if self.hosted {
+                        Color32::from_rgb(82, 107, 96)
                     } else {
                         Color32::from_gray(117)
                     }))
@@ -1673,23 +1771,107 @@ impl App {
             }
         }
         if let Some(index) = form.error.as_ref().and_then(|s| s.parse::<usize>().ok()) {
-            let position = responses[index].rect.left_bottom() + egui::vec2(12., 4.);
+            responses[index].request_focus();
+            let field = egui::Rect::from_min_size(
+                start + egui::vec2(0., index as f32 * (height + 6.)),
+                egui::vec2(width, height + if index == 3 { 2. } else { 0. }),
+            );
+            if self.hosted {
+                ui.painter().rect_stroke(
+                    field.expand(3.),
+                    17,
+                    egui::Stroke::new(2_f32, p.primary),
+                    egui::StrokeKind::Outside,
+                );
+            } else {
+                ui.painter().rect_stroke(
+                    field,
+                    14,
+                    egui::Stroke::new(2_f32, Color32::from_rgb(229, 151, 0)),
+                    egui::StrokeKind::Outside,
+                );
+                ui.painter().rect_stroke(
+                    field,
+                    14,
+                    egui::Stroke::new(1_f32, Color32::WHITE),
+                    egui::StrokeKind::Outside,
+                );
+            }
+            let maximum_width = (viewport.width() / 2. - 4.).max(96.);
+            let message = text_galley(
+                ui,
+                "Please fill out this field.",
+                14.,
+                20.3,
+                "picker-regular",
+                maximum_width - 48.,
+                usize::MAX,
+                Color32::BLACK,
+                false,
+            );
+            let multiple = message.rows.len() > 1;
+            let width = if multiple {
+                maximum_width
+            } else {
+                message.size().x + 48.
+            };
+            let tooltip_height = if multiple { 62. } else { 44. };
+            let position = egui::pos2(field.center().x - width / 2., field.bottom() + 8.);
             egui::Area::new(ui.id().with("required-field"))
                 .order(egui::Order::Tooltip)
+                .constrain(false)
                 .fixed_pos(position)
                 .show(ui.ctx(), |ui| {
-                    egui::Frame::new()
-                        .fill(Color32::from_rgb(255, 255, 238))
-                        .corner_radius(3)
-                        .stroke(egui::Stroke::new(1_f32, Color32::from_gray(120)))
-                        .inner_margin(8)
-                        .show(ui, |ui| {
-                            ui.label(
-                                RichText::new("Please fill out this field.")
-                                    .size(12.)
-                                    .color(Color32::BLACK),
-                            );
-                        });
+                    let rect =
+                        egui::Rect::from_min_size(position, egui::vec2(width, tooltip_height));
+                    ui.set_min_size(rect.size());
+                    ui.painter().add(
+                        egui::epaint::Shadow {
+                            offset: [0, 2],
+                            blur: 4,
+                            spread: 0,
+                            color: Color32::from_black_alpha(64),
+                        }
+                        .as_shape(rect, 2),
+                    );
+                    ui.painter().rect(
+                        rect,
+                        2,
+                        Color32::from_gray(250),
+                        egui::Stroke::new(1_f32, Color32::from_gray(160)),
+                        egui::StrokeKind::Inside,
+                    );
+                    let arrow = position + egui::vec2(17., 0.);
+                    ui.painter().add(egui::Shape::convex_polygon(
+                        vec![
+                            arrow - egui::vec2(7., 0.),
+                            arrow - egui::vec2(0., 7.),
+                            arrow + egui::vec2(7., 0.),
+                        ],
+                        Color32::from_gray(250),
+                        egui::Stroke::new(1_f32, Color32::from_gray(160)),
+                    ));
+                    let symbol = egui::Rect::from_min_size(
+                        position + egui::vec2(9., 8.),
+                        egui::vec2(22., 24.),
+                    );
+                    ui.painter()
+                        .rect_filled(symbol, 2, Color32::from_rgb(255, 145, 0));
+                    let mark = text_galley(
+                        ui,
+                        "!",
+                        18.,
+                        24.,
+                        "picker-bold",
+                        22.,
+                        1,
+                        Color32::WHITE,
+                        false,
+                    );
+                    ui.painter()
+                        .galley(symbol.center() - mark.size() / 2., mark, Color32::WHITE);
+                    ui.painter()
+                        .galley(position + egui::vec2(39., 8.), message, Color32::BLACK);
                 });
         }
         form.date_popup(
@@ -2475,8 +2657,10 @@ impl App {
                     }
                 });
         } else {
-            let back =
-                egui::Rect::from_min_size(header.min + egui::vec2(4., 0.), egui::vec2(26., 26.));
+            let back = egui::Rect::from_min_size(
+                header.min + egui::vec2(4., (header.height() - 26.) / 2.),
+                egui::vec2(26., 26.),
+            );
             egui::Image::new(egui::include_image!("../../assets/icons/chevron-left.svg"))
                 .tint(secondary)
                 .paint_at(ui, back.shrink(4.));
@@ -2497,7 +2681,7 @@ impl App {
             if let Some(text) = import_count {
                 ui.painter().galley(
                     egui::pos2(
-                        header.right() - 4. - text.size().x,
+                        header.right() - 4. - (available - left_width).max(1.),
                         header.center().y - text.size().y / 2.,
                     ),
                     text,
@@ -2522,7 +2706,7 @@ impl App {
                 egui::Stroke::new(1_f32, p.outline),
                 egui::StrokeKind::Inside,
             );
-            let inner = textarea.shrink(13.);
+            let inner = textarea.shrink(1.);
             let mut input_ui = ui.new_child(
                 egui::UiBuilder::new()
                     .id_salt("schedule-input")
@@ -2545,30 +2729,39 @@ impl App {
                 )
             };
             let mut focused = false;
-            egui::ScrollArea::both()
+            let home = ui
+                .ctx()
+                .data_mut(|data| data.remove_temp::<bool>(egui::Id::new("schedule-scroll-home")))
+                .unwrap_or(false)
+                || ui.memory(|memory| memory.has_focus(egui::Id::new("schedule-text")))
+                    && ui.input(|input| input.modifiers.ctrl && input.key_pressed(egui::Key::Home));
+            let mut input_scroll = egui::ScrollArea::both()
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .auto_shrink([false, false])
-                .max_height(inner.height().max(20.))
-                .show(&mut input_ui, |ui| {
-                    focused = ui
-                        .add(
-                            egui::TextEdit::multiline(&mut self.schedule_text)
-                                .id(egui::Id::new("schedule-text"))
-                                .frame(false)
-                                .font(egui::FontId::new(font, family.clone()))
-                                .hint_text(RichText::new("Paste schedule table...").color(
-                                    if self.hosted {
-                                        Color32::from_rgb(82, 107, 96)
-                                    } else {
-                                        Color32::from_gray(117)
-                                    },
-                                ))
-                                .margin(egui::Vec2::ZERO)
-                                .layouter(&mut layouter)
-                                .desired_width(inner.width()),
-                        )
-                        .has_focus();
-                });
+                .max_height(inner.height().max(20.));
+            if home {
+                input_scroll = input_scroll.horizontal_scroll_offset(12.);
+            }
+            input_scroll.show(&mut input_ui, |ui| {
+                focused = ui
+                    .add(
+                        egui::TextEdit::multiline(&mut self.schedule_text)
+                            .id(egui::Id::new("schedule-text"))
+                            .frame(false)
+                            .font(egui::FontId::new(font, family.clone()))
+                            .hint_text(RichText::new("Paste schedule table...").color(
+                                if self.hosted {
+                                    Color32::from_rgb(82, 107, 96)
+                                } else {
+                                    Color32::from_gray(117)
+                                },
+                            ))
+                            .margin(egui::vec2(12., 12.))
+                            .layouter(&mut layouter)
+                            .desired_width(inner.width() - 24.),
+                    )
+                    .has_focus();
+            });
             if focused {
                 ui.painter().rect_stroke(
                     textarea,
@@ -3049,9 +3242,11 @@ impl App {
                 ui.put(
                     input,
                     egui::TextEdit::singleline(&mut self.chat_input)
-                        .hint_text(
-                            RichText::new("Ask me anything...").color(Color32::from_gray(117)),
-                        )
+                        .hint_text(RichText::new("Ask me anything...").color(if self.hosted {
+                            Color32::from_rgb(82, 107, 96)
+                        } else {
+                            Color32::from_gray(117)
+                        }))
                         .font(egui::FontId::proportional(body_size))
                         .background_color(p.background)
                         .margin(egui::vec2(12., 8.)),

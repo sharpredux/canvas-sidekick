@@ -104,12 +104,14 @@ with tempfile.TemporaryDirectory(prefix='sidekick-rust-ui-') as temp:
         state=json.loads((profile/'state.json').read_text())
         assert any(i['id']=='assignment_10' for i in state['items']),'Canvas data did not reach the native state'
         output=root/'artifacts/ui';output.mkdir(parents=True,exist_ok=True)
-        (output/'fixture.json').write_text(json.dumps({'now':now.isoformat(),'settings':json.loads((profile/'settings.json').read_text()),'items':state['items']}))
+        fixture=json.dumps({'now':now.isoformat(),'settings':json.loads((profile/'settings.json').read_text()),'items':state['items']})
+        if not hosted:(output/'fixture.json').write_text(fixture)
         combinations=[('Medium','Standard')]
         if os.environ.get('SIDEKICK_UI_MATRIX')=='1' or '--matrix' in sys.argv:
             combinations=[(size,text) for size in ['Small','Medium','Large'] for text in ['Standard','Larger','Largest']]
             output=root/'artifacts/native';output.mkdir(parents=True,exist_ok=True)
         if hosted:output=root/'artifacts/native-hosted';output.mkdir(parents=True,exist_ok=True)
+        (output/'fixture.json').write_text(fixture)
         for size,text in combinations:
             send({'type':'test-preferences','size':size,'textSize':text});time.sleep(1.1)
             for index,name in [(2,'up-next'),(3,'tasks'),(4,'updates'),(1,'calendar'),(5,'settings'),(0,'ai-chat')]:
@@ -126,7 +128,7 @@ with tempfile.TemporaryDirectory(prefix='sidekick-rust-ui-') as temp:
                     assert expected in pixel.replace(' ',''), ('Compact tabs shifted the body margin',pixel)
             if '--details' in sys.argv:
                 schedule='Time Slot\tMon 08/06\tTue 09/06\n7:30AM - 9:00AM\t- CCINOV8 - INNOVATION Offline Venue : Online Teacher : Melvin Gabriel Ignacio Room No :\t- CCINOV8 - INNOVATION Offline Venue : Online Teacher : Melvin Gabriel Ignacio Room No :'
-                scenarios=[('form',None),('form-picker',None),('import',None),('import-filled',schedule),('schedule',schedule),('day',None),('ai-offline',None),('ai-model',None),('ai-pull',None),('auth-idle',None),('auth-waiting',None),('auth-error',None),('auth-success',None)]
+                scenarios=[('form',None),('form-picker',None),('form-year',None),('form-required',None),('import',None),('import-filled',schedule),('schedule',schedule),('day',None),('ai-offline',None),('ai-model',None),('ai-pull',None),('auth-idle',None),('auth-waiting',None),('auth-error',None),('auth-success',None)]
                 for name,text_value in scenarios:
                     command={'type':'test-view','mode':'import' if name=='import-filled' else name}
                     if text_value:command['text']=text_value
@@ -143,7 +145,7 @@ with tempfile.TemporaryDirectory(prefix='sidekick-rust-ui-') as temp:
         send({'type':'quit'});process.wait(timeout=10)
         assert process.returncode==0,process.stderr.read()
         assert any('/students/submissions' in path for path in requests)
-        print('PASS: mock Canvas state, native keyring restore, six native screens, polling while hidden; screenshots in artifacts/ui')
+        print(f'PASS: mock Canvas state, native keyring restore, {len(combinations)*(21 if "--details" in sys.argv else 6)} native captures, verified dimensions, polling while hidden; screenshots in {output.relative_to(root)}')
     except Exception:
         if process and process.poll() is not None: print(process.stderr.read())
         raise

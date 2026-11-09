@@ -129,6 +129,8 @@ struct Form {
     picker_minute: u32,
     picker_scroll: bool,
     picker_years: bool,
+    picker_expanded_year: i32,
+    picker_year_scroll: bool,
     error: Option<String>,
 }
 pub struct App {
@@ -946,14 +948,23 @@ impl eframe::App for App {
                     self.card_states.clear();
                     self.ai_generation += 1;
                     match mode {
-                        "form" | "form-picker" => {
+                        "form" | "form-picker" | "form-required" | "form-year" => {
                             self.tab = 3;
                             self.form = Some(Form {
                                 picker: local_now().date_naive(),
                                 ..Default::default()
                             });
-                            if mode == "form-picker" {
+                            if mode == "form-picker" || mode == "form-year" {
                                 self.form.as_mut().unwrap().open_date_picker();
+                            }
+                            if mode == "form-year" {
+                                let form = self.form.as_mut().unwrap();
+                                form.picker_years = true;
+                                form.picker_expanded_year = form.picker.year();
+                                form.picker_year_scroll = true;
+                            }
+                            if mode == "form-required" {
+                                self.form.as_mut().unwrap().error = Some("0".into());
                             }
                         }
                         "import" | "schedule" => {
@@ -965,6 +976,9 @@ impl eframe::App for App {
                             self.schedule_text = command["text"].as_str().unwrap_or("").into();
                             if command["text"].is_string() {
                                 ctx.memory_mut(|m| m.request_focus(egui::Id::new("schedule-text")));
+                                ctx.data_mut(|data| {
+                                    data.insert_temp(egui::Id::new("schedule-scroll-home"), true)
+                                });
                             }
                         }
                         "day" => {
@@ -1461,6 +1475,32 @@ pub fn run() -> eframe::Result<()> {
                 .entry(egui::FontFamily::Proportional)
                 .or_default()
                 .insert(0, "regular".into());
+            // Browser-native popups keep their control font in the hosted theme.
+            for (name, bytes) in [
+                (
+                    "picker-regular",
+                    include_bytes!("../../assets/fonts/Noto-Regular.ttf").as_slice(),
+                ),
+                (
+                    "picker-bold",
+                    include_bytes!("../../assets/fonts/Noto-Bold.ttf").as_slice(),
+                ),
+            ] {
+                let data = bytes.to_vec();
+                #[cfg(target_os = "windows")]
+                let data = std::fs::read(if name == "picker-bold" {
+                    r"C:\Windows\Fonts\segoeuib.ttf"
+                } else {
+                    r"C:\Windows\Fonts\segoeui.ttf"
+                })
+                .unwrap_or(data);
+                fonts
+                    .font_data
+                    .insert(name.into(), Arc::new(egui::FontData::from_owned(data)));
+                fonts
+                    .families
+                    .insert(egui::FontFamily::Name(name.into()), vec![name.into()]);
+            }
             let mono = include_bytes!("../../assets/fonts/NotoMono-Regular.ttf").to_vec();
             #[cfg(target_os = "windows")]
             let mono = std::fs::read(r"C:\Windows\Fonts\consola.ttf").unwrap_or(mono);
