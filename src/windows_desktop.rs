@@ -21,6 +21,17 @@ unsafe extern "system" {
         data: isize,
     ) -> i32;
     fn SetParent(child: Hwnd, parent: Hwnd) -> Hwnd;
+    fn GetWindowLongPtrW(hwnd: Hwnd, index: i32) -> isize;
+    fn SetWindowLongPtrW(hwnd: Hwnd, index: i32, value: isize) -> isize;
+    fn SetWindowPos(
+        hwnd: Hwnd,
+        after: Hwnd,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        flags: u32,
+    ) -> i32;
     fn ShowWindow(hwnd: Hwnd, command: i32) -> i32;
     fn SetTimer(hwnd: Hwnd, id: usize, elapsed: u32, callback: *const c_void) -> usize;
     fn KillTimer(hwnd: Hwnd, id: usize) -> i32;
@@ -142,7 +153,21 @@ unsafe extern "system" fn window_proc(
 pub fn attach(hwnd: usize, parent: Option<usize>) {
     let hwnd = hwnd as Hwnd;
     if let Some(parent) = parent {
-        unsafe { SetParent(hwnd, parent as Hwnd) };
+        unsafe {
+            // SetParent does not convert a top-level window into a child window.
+            let style = GetWindowLongPtrW(hwnd, -16);
+            SetWindowLongPtrW(hwnd, -16, (style & !(0x80000000_u32 as isize)) | 0x40000000);
+            SetParent(hwnd, parent as Hwnd);
+            SetWindowPos(
+                hwnd,
+                ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020,
+            );
+        }
         return;
     }
     unsafe { embed(hwnd) };

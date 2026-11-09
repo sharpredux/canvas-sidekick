@@ -1,4 +1,5 @@
 //! Isolated system-webview login. Session output travels only over a private pipe.
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
 use std::{
@@ -39,15 +40,21 @@ async fn verify(
     .await;
     match result {
         Ok(response) => {
+            let status = response.status().as_u16();
             let accepted = response.status().is_success()
                 && response
                     .headers()
                     .get("content-type")
                     .and_then(|v| v.to_str().ok())
                     .is_some_and(|v| v.contains("application/json"));
+            let accepted = accepted
+                && response.json::<Value>().await.ok().is_some_and(|profile| {
+                    profile["id"].as_u64().is_some()
+                        || profile["id"].as_str().is_some_and(|s| !s.is_empty())
+                });
             Verification {
                 cookies: accepted.then_some(cookies),
-                status: Some(response.status().as_u16()),
+                status: Some(status),
                 error: None,
             }
         }
@@ -106,6 +113,25 @@ fn main() -> Result<()> {
     };
     #[cfg(not(target_os = "linux"))]
     let webview = builder.build(&window)?;
+    let (failure_tx, failure_rx) = mpsc::channel::<()>();
+    #[cfg(target_os = "linux")]
+    {
+        use webkit2gtk::WebViewExt;
+        use wry::WebViewExtUnix;
+        webview
+            .webview()
+            .connect_load_failed(move |_, _, _, error| {
+                // Redirects and superseded navigations are normal during SSO.
+                if !error.matches(webkit2gtk::NetworkError::Cancelled)
+                    && !error.matches(webkit2gtk::PolicyError::FrameLoadInterruptedByPolicyChange)
+                {
+                    let _ = failure_tx.send(());
+                }
+                false
+            });
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _failure_tx = failure_tx;
     let started = Instant::now();
     let mut checking = false;
     let mut finished = false;
@@ -116,9 +142,10 @@ fn main() -> Result<()> {
         *flow=ControlFlow::WaitUntil(Instant::now()+Duration::from_millis(100));
         if finished{*flow=ControlFlow::Exit;return;}
         let cancelled=matches!(event,Event::WindowEvent{event:WindowEvent::CloseRequested,..});
-        if cancelled||started.elapsed()>Duration::from_secs(180){
+        let load_failed = failure_rx.try_recv().is_ok();
+        if cancelled||load_failed||started.elapsed()>Duration::from_secs(180){
             finished=true;
-            println!("{}",json!({"type":"failed","reason":if cancelled{"cancelled"}else{"timeout"}}));
+            println!("{}",json!({"type":"failed","reason":if cancelled{"cancelled"}else if load_failed{"load-failed"}else{"timeout"}}));
             *flow=ControlFlow::Exit;
             return;
         }

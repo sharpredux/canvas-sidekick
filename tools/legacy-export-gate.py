@@ -2,6 +2,7 @@
 """Verify the exporter against a synthetic Electron profile, never the real profile."""
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -26,7 +27,7 @@ with tempfile.TemporaryDirectory(prefix='sidekick-migration-gate-') as temp:
     assert any(c['name']=='canvas_session' and c['value']=='synthetic-cookie' and c['httpOnly'] for c in data['cookies'])
     assert before==hashes(),'Exporter changed the original synthetic profile'
     destination=temp/'rust-profile'
-    configuration={'destination':str(destination),'source':str(profile),'renderer':str(renderer),'electron':str(electron)}
+    configuration={'destination':str(destination),'source':str(profile),'renderer':str(renderer),'electron':os.environ.get('SIDEKICK_TEST_PACKAGED_RUNTIME',str(electron))}
     migrated=subprocess.run([str(root/'target/debug/migrate-profile')],input=json.dumps(configuration)+'\n',capture_output=True,text=True,timeout=45)
     assert migrated.returncode==0,migrated.stderr
     assert json.loads(migrated.stdout)['type']=='migration-complete'

@@ -11,14 +11,15 @@ app.whenReady().then(async()=>{
  await host.loadURL('data:text/html,<body style="background:%23eaf4ee">Isolated native Sidekick host test</body>');
  sidekick=createNativeSidekick({window:host,executable:path.resolve(__dirname,'../target/debug/canvas-sidekick'),profile:config.profile,
   onClose:()=>{},onTasks:items=>{
+   if(items.some(i=>i.title==='Keyboard task fixture'))console.log(JSON.stringify({type:'task-created'}));
    const task=items.find(i=>i.id==='personal');if(!task)return;
    if(!toggled){toggled=true;sidekick.webContents.send('command-center-toggle-canvas-task','personal');}
    else if(task.completed){console.log(JSON.stringify({type:'tasks-roundtrip',completed:true}));}
   }});
  sidekick.webContents.once('native-ready',event=>console.log(JSON.stringify({...event,type:'host-ready',parent:host.getNativeWindowHandle().readUInt32LE(0)})));
  await sidekick.ready;sidekick.setBounds({x:80,y:100,width:650,height:500});sidekick.setVisible(true);
- setTimeout(()=>{sidekick.setVisible(false);sidekick.setBounds({x:100,y:120,width:600,height:480});sidekick.setVisible(true);},4000);
- setTimeout(()=>{sidekick.webContents.close();},8000);
+ setTimeout(()=>{sidekick.setVisible(false);sidekick.setBounds({x:100,y:120,width:600,height:480});sidekick.setVisible(true);},10000);
+ setTimeout(()=>{sidekick.webContents.close();},13000);
  sidekick.webContents.once('destroyed',()=>{console.log(JSON.stringify({type:'host-stopped'}));host.close();app.quit();});
 });
-setTimeout(()=>{console.error('Native host test timed out.');sidekick?.webContents.close();app.exit(1);},12000).unref();
+setTimeout(()=>{console.error('Native host test timed out.');sidekick?.webContents.close();app.exit(1);},18000).unref();

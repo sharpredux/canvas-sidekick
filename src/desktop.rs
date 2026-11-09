@@ -126,7 +126,13 @@ pub fn shape(xid: u32, scale: f32, parent: Option<u32>, attach: bool) -> anyhow:
     let mut rectangles = Vec::new();
     for y in 0..r {
         let d = r as f32 - y as f32 - 0.5;
-        let inset = (r as f32 - ((r * r) as f32 - d * d).sqrt()).round() as i16;
+        let exponent = if parent.is_some() { 4_f32 } else { 2. };
+        let inset = (r as f32
+            * (1.
+                - (1. - (d / r as f32).powf(exponent))
+                    .max(0.)
+                    .powf(1. / exponent)))
+        .round() as i16;
         let row = Rectangle {
             x: inset,
             y,

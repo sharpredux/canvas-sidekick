@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Full native host parenting, pipe synchronization, keyboard/pointer and lifecycle check."""
 import ctypes as C
-import json,os,queue,subprocess,tempfile,threading,time
+import json,os,queue,signal,subprocess,tempfile,threading,time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 root=Path(__file__).resolve().parents[1]
@@ -37,6 +37,17 @@ def click(window,px,py):
     x.XTranslateCoordinates(display,window,root_window,px,py,C.byref(rx),C.byref(ry),C.byref(child))
     x.XSetInputFocus(display,window,1,0);xt.XTestFakeMotionEvent(display,-1,rx.value,ry.value,0)
     xt.XTestFakeButtonEvent(display,1,1,0);xt.XTestFakeButtonEvent(display,1,0,0);x.XFlush(display)
+def type_text(value):
+    for letter in value:
+        shifted=letter.isupper() or letter==':'
+        symbol={':':'semicolon',' ':'space','-':'minus','/':'slash'}.get(letter,letter.lower())
+        shift=x.XKeysymToKeycode(display,x.XStringToKeysym(b'Shift_L'))
+        key=x.XKeysymToKeycode(display,x.XStringToKeysym(symbol.encode()))
+        assert key, symbol
+        if shifted:xt.XTestFakeKeyEvent(display,shift,1,0)
+        xt.XTestFakeKeyEvent(display,key,1,0);xt.XTestFakeKeyEvent(display,key,0,0)
+        if shifted:xt.XTestFakeKeyEvent(display,shift,0,0)
+        x.XFlush(display);time.sleep(.025)
 with tempfile.TemporaryDirectory(prefix='sidekick-full-host-') as temp:
     temp=Path(temp);profile=temp/'native';profile.mkdir();electron_profile=temp/'electron';electron_profile.mkdir()
     (profile/'settings.json').write_text(json.dumps({'schoolUrl':origin,'size':'Medium'}))
@@ -48,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='sidekick-full-host-') as temp:
     process=None
     try:
         env={**os.environ,'SIDEKICK_HOST_CONFIG':str(config),'CANVAS_SIDEKICK_OLLAMA_URL':origin+'/api','CANVAS_SIDEKICK_TEST_AUTOSTART_DIR':str(temp/'autostart')}
-        process=subprocess.Popen([str(root.parent/'canvas-sidekick/node_modules/electron/dist/electron'),str(root/'tools/host-gate.cjs')],env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        process=subprocess.Popen([str(root.parent/'canvas-sidekick/node_modules/electron/dist/electron'),str(root/'tools/host-gate.cjs')],env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
         events=queue.Queue();observed=[]
         def read():
             for line in process.stdout:
@@ -70,14 +81,32 @@ with tempfile.TemporaryDirectory(prefix='sidekick-full-host-') as temp:
             key=x.XKeysymToKeycode(display,x.XStringToKeysym(letter.encode()));xt.XTestFakeKeyEvent(display,key,1,0);xt.XTestFakeKeyEvent(display,key,0,0);x.XFlush(display);time.sleep(.04)
         time.sleep(.4)
         assert any(any(m.get('role')=='user' and m.get('content')=='test' for m in request.get('messages',[])) for request in messages),'Native pointer/keyboard input did not reach AI chat'
-        time.sleep(3.1);assert geometry(window)[1:]==(100,120,600,480),geometry(window)
+        click(window,153,25);time.sleep(.4);click(window,615,465);time.sleep(.3)
+        captures=root/'artifacts/host';captures.mkdir(parents=True,exist_ok=True)
+        subprocess.run(['import','-window',str(window),str(captures/'form.png')],check=True)
+        from datetime import datetime,timedelta
+        due=(datetime.now()+timedelta(days=1)).replace(second=0,microsecond=0)
+        for y,text in [(65,'Keyboard task fixture'),(104,'Personal'),(143,'30m'),(182,due.strftime('%Y-%m-%dT%H:%M'))]:
+            click(window,110,y);type_text(text)
+        subprocess.run(['import','-window',str(window),str(captures/'filled.png')],check=True)
+        click(window,300,238);time.sleep(.5)
+        saved=json.loads((profile/'state.json').read_text())
+        task=next((i for i in saved['items'] if i['title']=='Keyboard task fixture'),None)
+        assert task and task['isCustom'] and task['isManual'], 'Task form did not create and persist the native task'
+        assert task['timeEstimate']=='30m' and task['dueDate'].endswith('Z'), task
+        time.sleep(max(0,deadline-time.monotonic()-.5));assert geometry(window)[1:]==(100,120,600,480),geometry(window)
         process.wait(timeout=12)
         while not events.empty():observed.append(events.get())
         assert process.returncode==0,process.stderr.read()
         assert any(e.get('type')=='tasks-roundtrip' for e in observed),'Host toggle did not return a completed snapshot'
+        assert any(e.get('type')=='task-created' for e in observed),'New task did not reach the host snapshot'
         assert any(e.get('type')=='host-stopped' for e in observed),'Child did not close cleanly'
-        print('PASS: full Rust child parenting, hidden startup, host bounds/visibility, task toggle roundtrip, real pointer/keyboard input, clean shutdown')
+        print('PASS: native parenting, bounds/visibility, task toggle and creation roundtrip, real pointer/keyboard chat and form input, clean shutdown')
     finally:
-        if process and process.poll() is None:process.kill();process.wait()
+        if process:
+            try:os.killpg(process.pid,signal.SIGTERM)
+            except ProcessLookupError:pass
+            process.wait(timeout=5)
+            time.sleep(.2)
         subprocess.run(['secret-tool','clear',*attributes],capture_output=True)
 x.XCloseDisplay(display);server.shutdown()

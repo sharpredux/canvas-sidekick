@@ -157,6 +157,9 @@ pub fn transfer(profile: &Profile, spec: &Legacy) -> Result<usize> {
     let store = Credentials::new(&profile.root);
     let previous = store.load()?;
     let runtime = prepare_runtime(spec, profile)?;
+    let snapshot = tempfile::Builder::new()
+        .prefix(".migration-snapshot-")
+        .tempdir_in(&profile.root)?;
     let mut child = Command::new(&runtime.executable)
         .arg(&spec.exporter)
         .env_remove("ELECTRON_RUN_AS_NODE")
@@ -171,7 +174,7 @@ pub fn transfer(profile: &Profile, spec: &Legacy) -> Result<usize> {
             .take()
             .context("Legacy export input unavailable")?,
         "{}",
-        json!({"profile":spec.source,"renderer":spec.renderer})
+        json!({"profile":spec.source,"renderer":spec.renderer,"snapshotRoot":snapshot.path()})
     )?;
     let output = child.wait_with_output()?;
     if !output.status.success() {

@@ -23,7 +23,7 @@ server=ThreadingHTTPServer(('127.0.0.1',0),Mock);threading.Thread(target=server.
 origin=f'http://127.0.0.1:{server.server_port}'
 with tempfile.TemporaryDirectory(prefix='sidekick-login-handoff-') as temporary:
     profile=Path(temporary);(profile/'settings.json').write_text('{}')
-    env={**os.environ,'CANVAS_SIDEKICK_PROFILE':str(profile),'CANVAS_SIDEKICK_TEST_AUTOSTART_DIR':str(profile/'autostart')}
+    env={**os.environ,'CANVAS_SIDEKICK_PROFILE':str(profile),'CANVAS_SIDEKICK_OLLAMA_URL':origin+'/ollama','CANVAS_SIDEKICK_TEST_AUTOSTART_DIR':str(profile/'autostart')}
     process=None;attributes=['service','canvas-sidekick-rust','profile',str(profile)]
     try:
         process=subprocess.Popen([str(root/'target/debug/canvas-sidekick')],env=env,text=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)

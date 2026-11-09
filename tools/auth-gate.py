@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise native HttpOnly cookies and login verification without a real account."""
 import json
+import os
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +19,8 @@ class Canvas(BaseHTTPRequestHandler):
                 body, status, mime = b'{"id":123}', 200, 'application/json'
             elif 'canvas_session=html' in cookie:
                 body, status, mime = b'<html>Not authenticated</html>', 200, 'text/html'
+            elif 'canvas_session=error' in cookie:
+                body, status, mime = b'{"errors":[{"message":"Unauthorized"}]}', 200, 'application/json'
             else:
                 body, status, mime = b'', 302, 'text/html'
             self.send_response(status)
@@ -25,7 +28,7 @@ class Canvas(BaseHTTPRequestHandler):
             self.send_header('Location', '/login')
         else:
             stage = self.path.strip('/') or 'preauth'
-            next_stage = {'preauth': 'html', 'html': 'authenticated'}.get(stage)
+            next_stage = {'preauth': 'html', 'html': 'error', 'error': 'authenticated'}.get(stage)
             body = ('<html><body>Isolated Canvas login gate: ' + stage +
                     (f'<script>setTimeout(()=>location.href="/{next_stage}",1400)</script>' if next_stage else '') + '</body></html>').encode()
             self.send_response(200)
@@ -38,8 +41,9 @@ class Canvas(BaseHTTPRequestHandler):
 server = ThreadingHTTPServer(('127.0.0.1', 0), Canvas)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 root = Path(__file__).resolve().parents[1]
+executable=os.environ.get('SIDEKICK_AUTH_EXECUTABLE',str(root/'target/debug/canvas-sidekick-auth'))
 try:
-    result = subprocess.run([str(root / 'target/debug/canvas-sidekick-auth')],
+    result = subprocess.run([executable],
                             input=json.dumps({'url': f'http://127.0.0.1:{server.server_port}/preauth'})+'\n',
                             capture_output=True, text=True, timeout=30, cwd=root)
     assert result.returncode == 0, result.stderr
@@ -48,8 +52,17 @@ try:
     cookie = next(c for c in event['cookies'] if c['name'] == 'canvas_session')
     assert cookie['value'] == 'authenticated', 'Pre-authentication or HTML response accepted'
     assert cookie['httpOnly'], 'Native cookie access must include HttpOnly cookies'
-    assert '/html' in requests and '/authenticated' in requests
-    assert requests.count('/api/v1/users/self/profile') >= 3
-    print('PASS: native HttpOnly cookie retrieval, redirect/HTML rejection, authenticated profile probe')
+    assert all('/'+stage in requests for stage in ['html','error','authenticated'])
+    assert requests.count('/api/v1/users/self/profile') >= 4
+    # Reserve and close a local port: navigation must fail without waiting 180 seconds.
+    import socket
+    with socket.socket() as reserved:
+        reserved.bind(('127.0.0.1',0)); closed_port=reserved.getsockname()[1]
+    failed = subprocess.run([executable],
+                            input=json.dumps({'url':f'http://127.0.0.1:{closed_port}/login'})+'\n',
+                            capture_output=True,text=True,timeout=15,cwd=root)
+    assert failed.returncode == 0, failed.stderr
+    assert json.loads(failed.stdout) == {'type':'failed','reason':'load-failed'}, failed.stdout
+    print('PASS: native HttpOnly cookies, redirect/HTML/invalid-profile rejection, authenticated profile, immediate navigation failure')
 finally:
     server.shutdown()

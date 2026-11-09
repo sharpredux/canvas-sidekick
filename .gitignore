@@ -2,3 +2,4 @@
 /artifacts/
 
 .sdk/
+__pycache__/

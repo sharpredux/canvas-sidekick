@@ -647,6 +647,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "url",
+ "webkit2gtk",
  "winit",
  "wry",
  "x11rb",

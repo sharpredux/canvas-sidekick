@@ -5,6 +5,7 @@ import json
 import os
 import queue
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -24,7 +25,7 @@ class Mock(BaseHTTPRequestHandler):
             data=[{'id':'assignment_10','type':'assignment','title':'A very long assignment title with an unbroken suffix ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789','context_name':'A long course name for layout verification','context_code':'course_101','start_at':due,'assignment':{'id':10,'course_id':101,'submission_types':['online_upload']}},{'id':'assignment_12','type':'assignment','title':'Meeting','context_name':'Meeting course','context_code':'course_101','start_at':due,'description':'https://zoom.us/j/123','assignment':{'id':12,'course_id':101,'submission_types':['online_upload']}}]
         elif path.endswith('/students/submissions'):data=[{'assignment_id':10,'workflow_state':'unsubmitted'},{'assignment_id':12,'workflow_state':'unsubmitted'}]
         elif path.endswith('/courses'):data=[{'id':101,'course_code':'Layout course'}]
-        elif path.endswith('/announcements'):data=[{'id':11,'title':'Announcement with a long title','message':'<p>Long announcement text </p>'*10,'context_code':'course_101','posted_at':datetime.now(timezone.utc).isoformat(),'user_name':'Synthetic teacher'}]
+        elif path.endswith('/announcements'):data=[{'id':11,'title':'Announcement with a long title','message':'<p>Long announcement text </p>'*10,'context_code':'course_101','posted_at':now.isoformat(),'user_name':'Synthetic teacher'}]
         elif path.endswith('/activity_stream'):data=[]
         elif path.endswith('/version'):data={'version':'test'}
         elif path.endswith('/tags'):data={'models':[{'name':'qwen2.5:3b'}]}
@@ -50,8 +51,26 @@ def raise_window(xid):
     for action,state in [(0,b'_NET_WM_STATE_BELOW'),(1,b'_NET_WM_STATE_ABOVE')]:
         event=Event();event.message.type=33;event.message.send_event=1;event.message.display=d;event.message.window=xid;event.message.message_type=x.XInternAtom(d,b'_NET_WM_STATE',0);event.message.format=32;event.message.data.l[:]=[action,x.XInternAtom(d,state,0),0,1,0];x.XSendEvent(d,x.XDefaultRootWindow(d),0,(1<<20)|(1<<19),C.byref(event))
     x.XFlush(d);x.XCloseDisplay(d)
+def pointer_outside():
+    x=C.CDLL('libX11.so.6');xt=C.CDLL('libXtst.so.6')
+    x.XOpenDisplay.argtypes=[C.c_char_p];x.XOpenDisplay.restype=C.c_void_p;d=x.XOpenDisplay(None)
+    xt.XTestFakeMotionEvent.argtypes=[C.c_void_p,C.c_int,C.c_int,C.c_int,C.c_ulong]
+    x.XFlush.argtypes=[C.c_void_p];x.XCloseDisplay.argtypes=[C.c_void_p]
+    xt.XTestFakeMotionEvent(d,-1,0,0,0);x.XFlush(d);x.XCloseDisplay(d)
 server=ThreadingHTTPServer(('127.0.0.1',0),Mock);threading.Thread(target=server.serve_forever,daemon=True).start()
 origin=f'http://127.0.0.1:{server.server_port}'
+hosted='--hosted' in sys.argv
+host_display=None
+if hosted:
+    host_x=C.CDLL('libX11.so.6')
+    host_x.XOpenDisplay.argtypes=[C.c_char_p];host_x.XOpenDisplay.restype=C.c_void_p
+    host_x.XDefaultRootWindow.argtypes=[C.c_void_p];host_x.XDefaultRootWindow.restype=C.c_ulong
+    host_x.XCreateSimpleWindow.argtypes=[C.c_void_p,C.c_ulong,C.c_int,C.c_int,C.c_uint,C.c_uint,C.c_uint,C.c_ulong,C.c_ulong];host_x.XCreateSimpleWindow.restype=C.c_ulong
+    host_x.XMapWindow.argtypes=[C.c_void_p,C.c_ulong];host_x.XFlush.argtypes=[C.c_void_p]
+    host_x.XDestroyWindow.argtypes=[C.c_void_p,C.c_ulong];host_x.XCloseDisplay.argtypes=[C.c_void_p]
+    host_display=host_x.XOpenDisplay(None);assert host_display
+    parent=host_x.XCreateSimpleWindow(host_display,host_x.XDefaultRootWindow(host_display),100,100,650,500,0,0,0)
+    host_x.XMapWindow(host_display,parent);host_x.XFlush(host_display);raise_window(parent)
 with tempfile.TemporaryDirectory(prefix='sidekick-rust-ui-') as temp:
     profile=Path(temp)
     (profile/'settings.json').write_text(json.dumps({'schoolUrl':origin,'size':'Medium','textSize':'Standard'}))
@@ -63,32 +82,65 @@ with tempfile.TemporaryDirectory(prefix='sidekick-rust-ui-') as temp:
     env={**os.environ,'CANVAS_SIDEKICK_PROFILE':str(profile),'CANVAS_SIDEKICK_OLLAMA_URL':origin+'/api','CANVAS_SIDEKICK_POLL_SECONDS':'2','CANVAS_SIDEKICK_TEST_NOW':now.isoformat(),'CANVAS_SIDEKICK_TEST_AUTOSTART_DIR':str(profile/'autostart')}
     process=None
     try:
-        process=subprocess.Popen([os.environ.get('WIDGET_EXECUTABLE',str(root/'target/debug/canvas-sidekick'))],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        arguments=[os.environ.get('WIDGET_EXECUTABLE',str(root/'target/debug/canvas-sidekick'))]
+        if hosted:arguments+=['--hosted-parent',str(parent)]
+        process=subprocess.Popen(arguments,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        def send(command):
+            process.stdin.write(json.dumps({'v':1,**command})+'\n');process.stdin.flush()
         events=queue.Queue()
         def read():
             for line in process.stdout:
                 try:events.put(json.loads(line))
                 except json.JSONDecodeError:pass
         threading.Thread(target=read,daemon=True).start()
-        ready=events.get(timeout=15);xid=ready['xid'];raise_window(xid)
+        ready=events.get(timeout=15)
+        while ready.get('type')!='ready':ready=events.get(timeout=15)
+        xid=ready['xid']
+        if hosted:
+            send({'type':'bounds','x':0,'y':0,'width':650,'height':500});send({'type':'visible','visible':True})
+        else:raise_window(xid)
+        pointer_outside()
         time.sleep(2)
         state=json.loads((profile/'state.json').read_text())
         assert any(i['id']=='assignment_10' for i in state['items']),'Canvas data did not reach the native state'
         output=root/'artifacts/ui';output.mkdir(parents=True,exist_ok=True)
         (output/'fixture.json').write_text(json.dumps({'now':now.isoformat(),'settings':json.loads((profile/'settings.json').read_text()),'items':state['items']}))
         combinations=[('Medium','Standard')]
-        if os.environ.get('SIDEKICK_UI_MATRIX')=='1':
+        if os.environ.get('SIDEKICK_UI_MATRIX')=='1' or '--matrix' in sys.argv:
             combinations=[(size,text) for size in ['Small','Medium','Large'] for text in ['Standard','Larger','Largest']]
             output=root/'artifacts/native';output.mkdir(parents=True,exist_ok=True)
+        if hosted:output=root/'artifacts/native-hosted';output.mkdir(parents=True,exist_ok=True)
         for size,text in combinations:
-            process.stdin.write(json.dumps({'type':'test-preferences','size':size,'textSize':text})+'\n');process.stdin.flush();time.sleep(1.1)
+            send({'type':'test-preferences','size':size,'textSize':text});time.sleep(1.1)
             for index,name in [(2,'up-next'),(3,'tasks'),(4,'updates'),(1,'calendar'),(5,'settings'),(0,'ai-chat')]:
-                process.stdin.write(json.dumps({'type':'tab','index':index})+'\n');process.stdin.flush();time.sleep(0.6)
+                send({'type':'tab','index':index});time.sleep(0.6)
                 assert process.poll() is None,process.stderr.read()
                 filename=f'{size}-{text}-{name}.png' if len(combinations)>1 else name+'.png'
                 subprocess.run(['import','-window',str(xid),str(output/filename)],check=True,timeout=10)
-        before=len(requests);process.stdin.write(json.dumps({'type':'visible','visible':False})+'\n');process.stdin.flush();time.sleep(4.5);assert len(requests)>before,'Background polling stopped while hidden'
-        process.stdin.write(json.dumps({'type':'quit'})+'\n');process.stdin.flush();process.wait(timeout=10)
+                dimensions=subprocess.check_output(['identify','-format','%wx%h',str(output/filename)],text=True)
+                expected='650x500' if hosted else {'Small':'280x320','Medium':'360x520','Large':'480x640'}[size]
+                assert dimensions==expected, (name,dimensions,expected)
+                if size=='Small' and name=='settings':
+                    pixel=subprocess.check_output(['magick',str(output/filename),'-format','%[pixel:p{14,100}]','info:'],text=True)
+                    expected='234,244,238' if hosted else '0,0,0'
+                    assert expected in pixel.replace(' ',''), ('Compact tabs shifted the body margin',pixel)
+            if '--details' in sys.argv:
+                schedule='Time Slot\tMon 08/06\tTue 09/06\n7:30AM - 9:00AM\t- CCINOV8 - INNOVATION Offline Venue : Online Teacher : Melvin Gabriel Ignacio Room No :\t- CCINOV8 - INNOVATION Offline Venue : Online Teacher : Melvin Gabriel Ignacio Room No :'
+                scenarios=[('form',None),('form-picker',None),('import',None),('import-filled',schedule),('schedule',schedule),('day',None),('ai-offline',None),('ai-model',None),('ai-pull',None),('auth-idle',None),('auth-waiting',None),('auth-error',None),('auth-success',None)]
+                for name,text_value in scenarios:
+                    command={'type':'test-view','mode':'import' if name=='import-filled' else name}
+                    if text_value:command['text']=text_value
+                    send(command);time.sleep(.15 if name=='auth-success' else .4)
+                    assert process.poll() is None,process.stderr.read()
+                    subprocess.run(['import','-window',str(xid),str(output/f'{size}-{text}-{name}.png')],check=True,timeout=10)
+                    if name=='ai-offline':
+                        # The full setup surface must survive painter-only content.
+                        pixel=subprocess.check_output(['magick',str(output/f'{size}-{text}-{name}.png'),'-format','%[pixel:p{20,100}]','info:'],text=True)
+                        expected='252,254,253' if hosted else '28,28,30'
+                        assert expected in pixel.replace(' ',''), ('AI setup surface collapsed',pixel)
+                send({'type':'test-view','mode':'normal'})
+        before=len(requests);send({'type':'visible','visible':False});time.sleep(4.5);assert len(requests)>before,'Background polling stopped while hidden'
+        send({'type':'quit'});process.wait(timeout=10)
         assert process.returncode==0,process.stderr.read()
         assert any('/students/submissions' in path for path in requests)
         print('PASS: mock Canvas state, native keyring restore, six native screens, polling while hidden; screenshots in artifacts/ui')
@@ -98,4 +150,5 @@ with tempfile.TemporaryDirectory(prefix='sidekick-rust-ui-') as temp:
     finally:
         if process and process.poll() is None:process.kill();process.wait()
         subprocess.run(['secret-tool','clear',*attributes],capture_output=True)
+        if host_display:host_x.XDestroyWindow(host_display,parent);host_x.XCloseDisplay(host_display)
 server.shutdown()

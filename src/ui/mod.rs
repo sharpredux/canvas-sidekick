@@ -19,6 +19,7 @@ use std::{
     sync::{Arc, OnceLock, mpsc},
     time::{Duration, Instant},
 };
+mod date_picker;
 mod screens;
 const BLUE: Color32 = Color32::from_rgb(50, 173, 230);
 const GREEN: Color32 = Color32::from_rgb(52, 199, 89);
@@ -39,6 +40,7 @@ struct Palette {
     background: Color32,
     text: Color32,
     on_primary: Color32,
+    on_accent: Color32,
     primary: Color32,
     success: Color32,
     error: Color32,
@@ -84,11 +86,12 @@ enum Event {
     Fetched(Result<Vec<Item>, String>, bool),
     CredentialError(String),
     SessionUpdated(Value),
+    StartupStatus(bool),
     Estimate(String, Result<Value, String>),
-    OllamaCheck(bool, bool),
-    Pull(u64),
-    PullDone(Result<(), String>),
-    Chat(Option<String>, Option<Value>),
+    OllamaCheck(u64, bool, bool),
+    Pull(u64, u64),
+    PullDone(u64, Result<(), String>),
+    Chat(u64, Option<String>, Option<Value>),
 }
 #[derive(Clone)]
 struct EventSender {
@@ -120,6 +123,12 @@ struct Form {
     estimate: String,
     date: String,
     picker: NaiveDate,
+    picker_open: bool,
+    picker_month: Option<NaiveDate>,
+    picker_hour: u32,
+    picker_minute: u32,
+    picker_scroll: bool,
+    picker_years: bool,
     error: Option<String>,
 }
 pub struct App {
@@ -138,6 +147,7 @@ pub struct App {
     fetching: bool,
     manual_sync: bool,
     sync_feedback_until: Option<Instant>,
+    startup_enabled: bool,
     auth_waiting: bool,
     auth_success: Option<(Value, Instant)>,
     auth_url: String,
@@ -167,6 +177,7 @@ pub struct App {
     archive: Vec<Item>,
     update_course: String,
     ai_checking: bool,
+    ai_generation: u64,
     ai_online: bool,
     ai_ready: bool,
     ai_pulling: bool,
@@ -176,12 +187,21 @@ pub struct App {
     typing: bool,
 }
 impl App {
+    fn body_bottom(&self, ctx: &egui::Context) -> f32 {
+        ctx.content_rect().bottom()
+            - if self.settings.size == "Small" {
+                13.
+            } else {
+                17.
+            }
+    }
     fn palette(&self) -> Palette {
         if self.hosted {
             Palette {
                 background: Color32::from_rgb(234, 244, 238),
                 text: Color32::from_rgb(25, 61, 48),
                 on_primary: Color32::from_rgb(0, 66, 59),
+                on_accent: Color32::WHITE,
                 primary: Color32::from_rgb(0, 107, 95),
                 success: Color32::from_rgb(20, 184, 166),
                 error: Color32::from_rgb(186, 26, 26),
@@ -194,6 +214,7 @@ impl App {
                 background: Color32::BLACK,
                 text: Color32::WHITE,
                 on_primary: Color32::BLACK,
+                on_accent: Color32::BLACK,
                 primary: BLUE,
                 success: GREEN,
                 error: RED,
@@ -228,11 +249,13 @@ impl App {
             task.abort();
         }
         let tx = self.tx.clone();
-        let mut seconds = 900;
+        let seconds = 900;
         #[cfg(debug_assertions)]
-        if let Ok(value) = std::env::var("CANVAS_SIDEKICK_POLL_SECONDS") {
-            seconds = value.parse::<u64>().unwrap_or(900).max(1);
-        }
+        let seconds = std::env::var("CANVAS_SIDEKICK_POLL_SECONDS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(seconds)
+            .max(1);
         self.poll_task = Some(self.rt.spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(seconds));
             interval.tick().await;
@@ -350,6 +373,7 @@ impl App {
     }
     fn check_ai(&mut self) {
         self.ai_checking = true;
+        let generation = self.ai_generation;
         let tx = self.tx.clone();
         self.rt.spawn(async move {
             let ollama = Ollama::default();
@@ -365,7 +389,7 @@ impl App {
             } else {
                 false
             };
-            let _ = tx.send(Event::OllamaCheck(online, ready));
+            let _ = tx.send(Event::OllamaCheck(generation, online, ready));
         });
     }
     fn login(&mut self) {
@@ -409,6 +433,7 @@ impl App {
                         "{}",
                         match event["reason"].as_str() {
                             Some("timeout") => "Login timed out.",
+                            Some("load-failed") => "Canvas could not be opened.",
                             Some("invalid-url") => "Enter a valid Canvas URL.",
                             _ => "Login was cancelled.",
                         }
@@ -440,6 +465,7 @@ impl App {
     fn events(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             match event {
+                Event::StartupStatus(enabled) => self.startup_enabled = enabled,
                 Event::SessionUpdated(session) => self.session = Some(session),
                 Event::CredentialError(error) => self.error = Some(error),
                 Event::PollDue => {
@@ -549,21 +575,30 @@ impl App {
                         self.estimating.remove(&id);
                     }
                 },
-                Event::OllamaCheck(online, ready) => {
+                Event::OllamaCheck(generation, online, ready) => {
+                    if generation != self.ai_generation || self.tab != 0 {
+                        continue;
+                    }
                     self.ai_checking = false;
                     self.ai_online = online;
                     self.ai_ready = ready;
                 }
-                Event::Pull(p) => self.ai_progress = p,
-                Event::PullDone(result) => {
+                Event::Pull(generation, p) => {
+                    if generation == self.ai_generation && self.tab == 0 {
+                        self.ai_progress = p;
+                    }
+                }
+                Event::PullDone(generation, result) => {
+                    if generation != self.ai_generation || self.tab != 0 {
+                        continue;
+                    }
                     self.ai_pulling = false;
                     match result {
                         Ok(()) => self.ai_ready = true,
                         Err(e) => self.error = Some(e),
                     }
                 }
-                Event::Chat(reply, command) => {
-                    self.typing = false;
+                Event::Chat(generation, reply, command) => {
                     let mut action = None;
                     if let Some(command) = command {
                         if command["intent"] == "add_task" {
@@ -603,7 +638,11 @@ impl App {
                             );
                         }
                     }
-                    if let Some(reply) = reply {
+                    if generation != self.ai_generation || self.tab != 0 {
+                        continue;
+                    }
+                    self.typing = false;
+                    if let Some(reply) = reply.filter(|s| !s.is_empty()) {
                         self.messages
                             .push(json!({"role":"assistant","content":reply}));
                     } else if action.is_none() {
@@ -656,6 +695,11 @@ impl App {
         }
         self.tab = index;
         if index == 0 {
+            self.ai_generation += 1;
+            self.chat_input.clear();
+            self.typing = false;
+            self.ai_pulling = false;
+            self.ai_progress = 0;
             self.messages = vec![
                 json!({"role":"assistant","content":"Hello! I am your AI assistant. How can I help you today?"}),
             ];
@@ -674,8 +718,17 @@ impl App {
         if index == 4 {
             self.update_course = "All".into();
         }
+        if index == 5 {
+            let tx = self.tx.clone();
+            self.rt.spawn_blocking(move || {
+                let _ = tx.send(Event::StartupStatus(startup_status()));
+            });
+        }
     }
     fn save_schedule(&mut self) {
+        if self.schedule_text.trim().is_empty() {
+            self.schedule_text.clear();
+        }
         self.import_status_until = Some(Instant::now() + Duration::from_secs(2));
         let parsed = schedule::parse(&self.schedule_text);
         if !self.schedule_text.trim().is_empty() && parsed.is_empty() {
@@ -720,40 +773,67 @@ fn startup_status() -> bool {
     #[cfg(target_os = "linux")]
     return startup_path().exists();
     #[cfg(target_os = "windows")]
-    return std::process::Command::new("reg")
-        .args([
-            "query",
-            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-            "/v",
-            "Canvas Sidekick",
-        ])
-        .output()
-        .is_ok_and(|o| o.status.success());
+    {
+        use std::os::windows::process::CommandExt;
+        let mut command = std::process::Command::new("reg");
+        command.creation_flags(0x08000000);
+        return command
+            .args([
+                "query",
+                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+                "/v",
+                "Canvas Sidekick",
+            ])
+            .output()
+            .is_ok_and(|o| o.status.success());
+    }
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     false
+}
+fn startup_command() -> anyhow::Result<Vec<String>> {
+    if let Ok(value) = std::env::var("CANVAS_SIDEKICK_STARTUP_COMMAND") {
+        let command: Vec<String> = serde_json::from_str(&value)?;
+        if command.is_empty() {
+            anyhow::bail!("Missing startup executable");
+        }
+        return Ok(command);
+    }
+    Ok(vec![
+        std::env::var_os("APPIMAGE")
+            .or_else(|| std::env::var_os("CANVAS_SIDEKICK_PORTABLE_EXECUTABLE"))
+            .map(PathBuf::from)
+            .unwrap_or(std::env::current_exe()?)
+            .to_string_lossy()
+            .into_owned(),
+    ])
 }
 fn set_startup(enabled: bool) -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     {
         let path = startup_path();
         if enabled {
-            let executable = std::env::var_os("APPIMAGE")
-                .map(PathBuf::from)
-                .unwrap_or(std::env::current_exe()?);
-            let escaped = executable
-                .to_string_lossy()
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-                .replace('`', "\\`")
-                .replace('$', "\\$");
-            canvas_sidekick_rust::storage::atomic_write(&path,format!("[Desktop Entry]\nType=Application\nName=Canvas Sidekick\nExec=\"{escaped}\"\nTerminal=false\nX-GNOME-Autostart-enabled=true\nX-KDE-autostart-after=panel\n").as_bytes())?;
+            let escaped = startup_command()?
+                .iter()
+                .map(|arg| {
+                    let escaped = arg
+                        .replace('\\', "\\\\")
+                        .replace('"', "\\\"")
+                        .replace('`', "\\`")
+                        .replace('$', "\\$");
+                    format!("\"{escaped}\"")
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            canvas_sidekick_rust::storage::atomic_write(&path,format!("[Desktop Entry]\nType=Application\nVersion=1.0\nName=Canvas Sidekick\nComment=Canvas agenda and study assistant\nExec={escaped}\nTerminal=false\nStartupNotify=false\nX-GNOME-Autostart-enabled=true\nX-KDE-autostart-after=panel\n").as_bytes())?;
         } else if path.exists() {
             std::fs::remove_file(path)?;
         }
     }
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         let mut command = std::process::Command::new("reg");
+        command.creation_flags(0x08000000);
         if enabled {
             command
                 .args([
@@ -765,7 +845,32 @@ fn set_startup(enabled: bool) -> anyhow::Result<()> {
                     "REG_SZ",
                     "/d",
                 ])
-                .arg(format!("\"{}\"", std::env::current_exe()?.display()))
+                .arg(
+                    startup_command()?
+                        .iter()
+                        .map(|arg| {
+                            let mut quoted = String::from("\"");
+                            let mut slashes = 0;
+                            for ch in arg.chars() {
+                                if ch == '\\' {
+                                    slashes += 1;
+                                    continue;
+                                }
+                                if ch == '"' {
+                                    quoted.push_str(&"\\".repeat(slashes * 2 + 1));
+                                } else {
+                                    quoted.push_str(&"\\".repeat(slashes));
+                                }
+                                quoted.push(ch);
+                                slashes = 0;
+                            }
+                            quoted.push_str(&"\\".repeat(slashes * 2));
+                            quoted.push('"');
+                            quoted
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                )
                 .arg("/f");
         } else {
             command.args([
@@ -816,9 +921,91 @@ impl eframe::App for App {
             ));
         }
         self.events();
+        if let Some(until) = self
+            .sync_feedback_until
+            .filter(|until| *until > Instant::now())
+        {
+            ctx.request_repaint_after(until.saturating_duration_since(Instant::now()));
+        }
         self.card_actions();
         while let Ok(command) = self.host_rx.try_recv() {
+            if self.hosted && command["v"] != 1 {
+                continue;
+            }
             match command["type"].as_str() {
+                #[cfg(debug_assertions)]
+                Some("test-view") => {
+                    let mode = command["mode"].as_str().unwrap_or("normal");
+                    self.auth_success = None;
+                    self.auth_waiting = false;
+                    self.error = None;
+                    self.checking = false;
+                    self.authenticated = true;
+                    self.form = None;
+                    self.import_open = false;
+                    self.card_states.clear();
+                    self.ai_generation += 1;
+                    match mode {
+                        "form" | "form-picker" => {
+                            self.tab = 3;
+                            self.form = Some(Form {
+                                picker: local_now().date_naive(),
+                                ..Default::default()
+                            });
+                            if mode == "form-picker" {
+                                self.form.as_mut().unwrap().open_date_picker();
+                            }
+                        }
+                        "import" | "schedule" => {
+                            self.tab = 1;
+                            self.import_open = true;
+                            self.import_schedule = mode == "schedule";
+                            self.import_day = 0;
+                            self.import_status = None;
+                            self.schedule_text = command["text"].as_str().unwrap_or("").into();
+                            if command["text"].is_string() {
+                                ctx.memory_mut(|m| m.request_focus(egui::Id::new("schedule-text")));
+                            }
+                        }
+                        "day" => {
+                            self.tab = 1;
+                            self.selected_day = self
+                                .state
+                                .items
+                                .iter()
+                                .find(|i| i.kind == "deadline")
+                                .and_then(|i| i.timestamp())
+                                .map(|d| d.with_timezone(&Local).date_naive());
+                        }
+                        "auth-idle" | "auth-waiting" | "auth-error" | "auth-success" => {
+                            self.authenticated = false;
+                            self.auth_url = if mode == "auth-idle" {
+                                String::new()
+                            } else {
+                                "canvas.example.edu".into()
+                            };
+                            self.auth_waiting = mode == "auth-waiting";
+                            if mode == "auth-error" {
+                                self.error = Some("Enter a valid Canvas URL.".into());
+                            }
+                            if mode == "auth-success" {
+                                self.auth_success = self
+                                    .session
+                                    .clone()
+                                    .map(|s| (s, Instant::now() + Duration::from_millis(500)));
+                            }
+                        }
+                        "ai-offline" | "ai-model" | "ai-pull" => {
+                            self.tab = 0;
+                            self.ai_checking = false;
+                            self.ai_online = mode != "ai-offline";
+                            self.ai_ready = false;
+                            self.ai_pulling = mode == "ai-pull";
+                            self.ai_progress = 42;
+                        }
+                        _ => self.tab = 2,
+                    }
+                }
                 #[cfg(debug_assertions)]
                 Some("test-login") => {
                     if let Some(url) = command["url"].as_str() {
@@ -835,12 +1022,14 @@ impl eframe::App for App {
                         self.settings.text_size = text.into();
                     }
                     self.settings.normalize();
-                    self.resize_pending = true;
-                    self.last_shape = Instant::now() - Duration::from_secs(2);
-                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
-                        egui::Vec2::from(self.settings.dimensions(cfg!(target_os = "linux")))
-                            / ctx.zoom_factor(),
-                    ));
+                    if !self.hosted {
+                        self.resize_pending = true;
+                        self.last_shape = Instant::now() - Duration::from_secs(2);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                            egui::Vec2::from(self.settings.dimensions(cfg!(target_os = "linux")))
+                                / ctx.zoom_factor(),
+                        ));
+                    }
                 }
                 Some("bounds") => {
                     if let (Some(w), Some(h)) =
@@ -945,6 +1134,7 @@ impl eframe::App for App {
             1.
         };
         let mut style = (*ctx.style()).clone();
+        style.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
         style.text_styles.insert(
             egui::TextStyle::Body,
             egui::FontId::proportional(14. * scale),
@@ -974,9 +1164,20 @@ impl eframe::App for App {
                     .fill(p.background)
                     .stroke(egui::Stroke::new(1_f32, p.outline))
                     .corner_radius(if cfg!(target_os="linux")||self.hosted{24}else if self.settings.size=="Small"{40}else{28})
-                    .inner_margin(egui::Margin {left:if self.settings.size=="Small" {8}else{12},right:if self.settings.size=="Small" {8}else{12},top:12,bottom:16}),
+                    .inner_margin(egui::Margin {left:if cfg!(target_os="linux")&&self.settings.size!="Small"&&ctx.content_rect().width()<=310. {8}else{12},right:if cfg!(target_os="linux")&&self.settings.size!="Small"&&ctx.content_rect().width()<=310. {8}else{12},top:12,bottom:if self.settings.size=="Small"{12}else{16}}),
             )
             .show(ctx, |ui| {
+                if self.hosted {
+                    let painter=ui.painter().with_clip_rect(ctx.content_rect());
+                    painter.add(screens::squircle(ctx.content_rect().shrink(0.5),24.,false,p.background,egui::Stroke::new(1_f32,p.outline)));
+                    if self.authenticated&&!self.checking&&self.form.is_none(){
+                        let compact=self.settings.size=="Small"||ctx.content_rect().width()<=310.;
+                        let height=if compact{39.}else{45.};
+                        let header=egui::Rect::from_min_size(ctx.content_rect().min+egui::vec2(1.,1.),egui::vec2(ctx.content_rect().width()-2.,height));
+                        painter.add(screens::squircle(header,23.,true,Color32::from_rgb(242,248,244),egui::Stroke::NONE));
+                        painter.hline(header.x_range(),header.bottom()-0.5,egui::Stroke::new(1_f32,Color32::from_rgb(204,222,211)));
+                    }
+                }
                 if self.checking {
                     let center=ctx.content_rect().center();
                     ui.painter().circle_stroke(center,15.,egui::Stroke::new(4.5_f32,Color32::from_white_alpha(26)));
@@ -1001,23 +1202,25 @@ impl eframe::App for App {
                     return;
                 }
                 if self.form.is_some() {
-                    egui::ScrollArea::vertical().show(ui, |ui| self.task_form(ui));
+                    egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| self.task_form(ui));
                     return;
                 }
                 self.header(ui);
                 let show_add = self.tab == 2 || self.tab == 3;
                 let height = ui.available_height();
                 if self.tab == 0 {
+                    let padding=if cfg!(target_os="linux"){8}else if self.settings.size=="Small"{4}else{12};
                     egui::Frame::new()
                         .fill(p.card)
                         .corner_radius(16)
-                        .inner_margin(8)
+                        .inner_margin(padding)
                         .show(ui, |ui| {
-                            ui.set_height(height.max(240.) - 16.);
+                            ui.set_min_width(ui.available_width());
+                            ui.set_height(height.max(if cfg!(target_os="linux"){240.}else{0.}) - 2.*padding as f32);
                             self.ai(ui);
                         });
                 } else {
-                    egui::ScrollArea::vertical()
+                    egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                         .id_salt(("content", self.tab))
                         .max_height(height.max(40.))
                         .show(ui, |ui| {
@@ -1042,7 +1245,7 @@ impl eframe::App for App {
                         if fab_ui
                             .put(rect,
                                 egui::Button::image(egui::Image::new(egui::include_image!("../../assets/icons/add.svg")).tint(p.on_primary).fit_to_exact_size(egui::vec2(20.,20.)))
-                                    .fill(p.success)
+                                    .fill(if ctx.input(|i|i.pointer.hover_pos().is_some_and(|point|rect.contains(point))){p.primary}else{p.success})
                                     .corner_radius(100)
                                     .min_size(egui::vec2(size, size)),
                             )
@@ -1156,6 +1359,11 @@ pub fn run() -> eframe::Result<()> {
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size(dimensions)
+            .with_app_id("canvas-sidekick")
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../../assets/app-icon.png"))
+                    .unwrap_or_default(),
+            )
             .with_visible(parent.is_none())
             .with_decorations(false)
             .with_transparent(true)
@@ -1253,6 +1461,17 @@ pub fn run() -> eframe::Result<()> {
                 .entry(egui::FontFamily::Proportional)
                 .or_default()
                 .insert(0, "regular".into());
+            let mono = include_bytes!("../../assets/fonts/NotoMono-Regular.ttf").to_vec();
+            #[cfg(target_os = "windows")]
+            let mono = std::fs::read(r"C:\Windows\Fonts\consola.ttf").unwrap_or(mono);
+            fonts
+                .font_data
+                .insert("mono".into(), Arc::new(egui::FontData::from_owned(mono)));
+            fonts
+                .families
+                .entry(egui::FontFamily::Monospace)
+                .or_default()
+                .insert(0, "mono".into());
             cc.egui_ctx.set_fonts(fonts);
             Ok(Box::new(App {
                 profile,
@@ -1270,6 +1489,7 @@ pub fn run() -> eframe::Result<()> {
                 fetching: false,
                 manual_sync: false,
                 sync_feedback_until: None,
+                startup_enabled: false,
                 auth_waiting: false,
                 auth_success: None,
                 auth_url,
@@ -1299,6 +1519,7 @@ pub fn run() -> eframe::Result<()> {
                 archive: Vec::new(),
                 update_course: "All".into(),
                 ai_checking: true,
+                ai_generation: 0,
                 ai_online: false,
                 ai_ready: false,
                 ai_pulling: false,

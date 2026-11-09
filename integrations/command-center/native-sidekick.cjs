@@ -2,11 +2,13 @@
 const {spawn}=require('node:child_process');
 const {EventEmitter}=require('node:events');
 const readline=require('node:readline');
+const {app}=require('electron');
 function createNativeSidekick({window,executable,profile,onTasks,onClose}){
  const contents=new EventEmitter();let ready=false,visible=false,bounds={x:256,y:76,width:900,height:700},stopped=false;
  const handle=window.getNativeWindowHandle();
  const parent=process.platform==='win32'?handle.readBigUInt64LE(0).toString():String(handle.readUInt32LE(0));
- const child=spawn(executable,['--profile',profile,'--hosted-parent',parent],{stdio:['pipe','pipe','pipe'],env:{...process.env,CANVAS_SIDEKICK_PROFILE:profile}});
+ const startup=process.env.APPIMAGE?[process.env.APPIMAGE]:app.isPackaged?[process.execPath]:[process.execPath,app.getAppPath()];
+ const child=spawn(executable,['--profile',profile,'--hosted-parent',parent],{stdio:['pipe','pipe','pipe'],env:{...process.env,CANVAS_SIDEKICK_PROFILE:profile,CANVAS_SIDEKICK_STARTUP_COMMAND:JSON.stringify(startup)}});
  const send=command=>{if(!stopped&&!child.stdin.destroyed)child.stdin.write(JSON.stringify({v:1,...command})+'\n');};
  const apply=()=>{send({type:'bounds',...bounds});send({type:'visible',visible});};
  const started=new Promise((resolve,reject)=>{

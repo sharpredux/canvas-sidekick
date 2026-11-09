@@ -6,7 +6,7 @@ edition = "2024"
 [features]
 default = ["desktop"]
 desktop = ["dep:eframe", "dep:x11rb", "dep:raw-window-handle", "dep:egui_extras", "dep:winit"]
-auth = ["dep:wry", "dep:tao"]
+auth = ["dep:wry", "dep:tao", "dep:webkit2gtk"]
 
 [dependencies]
 anyhow = "1"
@@ -28,6 +28,9 @@ wry = { version = "0.53", optional = true }
 tao = { version = "0.34", optional = true }
 
 tempfile = "3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "2.0", optional = true }
 
 [dev-dependencies]
 
@@ -60,3 +63,6 @@ incremental = false
 [profile.test]
 debug = 0
 incremental = false
+
+[profile.release]
+strip = "symbols"

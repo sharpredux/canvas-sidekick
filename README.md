@@ -23,7 +23,10 @@ Sessions use Linux Secret Service or Windows DPAPI. Cookies, including renewal a
 - `python3 tools/legacy-export-gate.py`: synthetic export, atomic import, protected credentials and unchanged-source checks.
 - `python3 tools/login-handoff-gate.py`: full native sign-in → Sidekick assignment handoff.
 - `python3 tools/host-gate.py`: full native host, task roundtrip, real pointer/keyboard input, visibility/resize and shutdown.
-- `SIDEKICK_UI_MATRIX=1 python3 tools/ui-gate.py` then `node tools/reference-capture.mjs`: matching fixture/clock captures for all 54 tab/size/text-scale combinations.
+- `node tools/command-center-gate.mjs`: actual Command Center navigation, task-checkbox sync, native resize/visibility and child shutdown.
+- `python3 tools/ui-gate.py --matrix --details` then `node tools/reference-capture.mjs --details --picker`: original tab/size/text-scale combinations plus form, calendar details, schedule import, AI setup and authentication states. The gates verify actual viewport dimensions.
+- Add `--hosted` to both capture commands to compare Command Center's appearance. Add `--medium` to the reference command for a quick single-preset review.
+- `python3 tools/package-smoke.py`: extract the candidate RPM/AppImage and exercise their release windows, migration bridge, dependencies and login helper.
 
 Integration scripts require a graphical desktop and unlocked keyring. They use temporary profiles, mock services and synthetic credentials, then clean up their entries. Real DLSU SSO already passed; its temporary session was discarded. Captures go to ignored `artifacts/native/` and `artifacts/reference/`. Additional state and popup comparisons remain necessary.
 
@@ -32,6 +35,16 @@ Integration scripts require a graphical desktop and unlocked keyring. They use t
 `python3 tools/integrate-command-center.py` installs the opt-in adapter. Run Command Center with `CANVAS_SIDEKICK_RUST=1`, `CANVAS_SIDEKICK_EXECUTABLE` set to the absolute native executable, and optionally `CANVAS_SIDEKICK_PROFILE` pointing to an already initialized Rust profile. The default remains the existing Electron view. Complete standalone migration first: Command Center still owns the legacy profile lock for its other encrypted integrations.
 
 The adapter uses versioned JSON lines on private child-process pipes. Hosted styling preserves the mint palette and Manrope faces. The full native host test passes; Command Center's 28 existing regression tests also pass.
+
+## Candidate packages
+
+`python3 tools/package-linux.py` builds both release executables, then writes a parallel-install RPM and AppImage to `artifacts/packages/`. `--skip-build` packages an existing release build. SHA-256 checksums and platform/dependency information are recorded in `manifest.json`. No package is installed automatically.
+
+The Linux AppImage uses system GTK3, WebKitGTK 4.1, `secret-tool`, and graphics libraries. The current Fedora-built candidate requires glibc 2.43; it is not validated on older Linux distributions. Both packages retain the migration bridge and dependency/font notices. Keep the old Electron runtime available until migration succeeds.
+
+On Windows, run `tools/package-windows.ps1` with Rust, Python, NSIS and the WebView2 Runtime available. It prepares a per-user installer and a single-file portable wrapper that extracts both native executables together. These recipes have not been built or tested on Windows.
+
+Command Center has an explicit candidate packaging configuration at `integrations/command-center/electron-builder-native.cjs`. Build the Rust release first, run `python3 tools/integrate-command-center.py`, then run Electron Builder from the Command Center directory with that configuration. Candidate output goes to this repository's `artifacts/command-center-package/`; its ordinary build configuration and default Electron route remain unchanged.
 
 Windows WorkerW, Show Desktop, and sleep/lock recovery validation remain pending by explicit user choice. No final cutover or Windows replacement is claimed.
 

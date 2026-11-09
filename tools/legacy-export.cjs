@@ -25,7 +25,7 @@ async function run(config){
  if(hasLiveLinuxDatabaseLock(config.profile))throw new Error('Close the legacy Sidekick and Command Center before migration.');
  app.setName('canvas-sidekick');app.setPath('userData',path.resolve(config.profile));
  if(!app.requestSingleInstanceLock())throw new Error('Close the legacy Sidekick and Command Center before migration.');
- snapshot=fs.mkdtempSync(path.join(os.tmpdir(),'sidekick-legacy-export-'));
+ snapshot=fs.mkdtempSync(path.join(config.snapshotRoot||os.tmpdir(),'sidekick-legacy-export-'));
  fs.cpSync(config.profile,snapshot,{recursive:true,filter:source=>!['SingletonLock','SingletonCookie','SingletonSocket','Cache','Code Cache','GPUCache','DawnCache'].includes(path.basename(source))});
  app.setPath('userData',snapshot);
  await app.whenReady();
@@ -55,9 +55,9 @@ async function run(config){
 }
 app.setName('canvas-sidekick');
 try {
- let input='';const byte=Buffer.alloc(1);
- while(input.length<1024*1024&&fs.readSync(0,byte,0,1,null)>0){if(byte[0]===10)break;input+=byte.toString();}
- run(JSON.parse(input)).catch(fail);
+ const input=[];const byte=Buffer.alloc(1);
+ while(input.length<1024*1024&&fs.readSync(0,byte,0,1,null)>0){if(byte[0]===10)break;input.push(byte[0]);}
+ run(JSON.parse(Buffer.from(input).toString('utf8'))).catch(fail);
 }catch(error){fail(error);}
 function fail(error){process.stderr.write('Legacy migration failed: '+error.message+'\n');app.exit(1);}
 app.on('will-quit',()=>{if(snapshot)try{fs.rmSync(snapshot,{recursive:true,force:true});}catch{ /* Locked files are removed by the migration launcher after exit. */ }});

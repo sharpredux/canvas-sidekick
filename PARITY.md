@@ -8,19 +8,19 @@ The Electron UI is the specification. Preserve its controls, layouts, states, ho
 | Completion | Overrides, remote reconciliation, cache and estimates; 2,568 differential cases pass | Final UI interaction review |
 | Agenda/schedule rules | 37 differential scenarios, 144 items per agenda scenario pass | None identified in tested rules |
 | Storage | Exclusive owner, atomic saves/import, corruption detection, retained unknown fields, UTC archive deduplication | Packaged upgrade/recovery checks |
-| Migration | Synthetic export → Rust import → keyring passes; source hashes unchanged; no plaintext session file | Packaged runtime path and real transfer after closing old apps |
+| Migration | Synthetic export → Rust import → keyring passes with both development and installed packaged Electron runtimes; source hashes unchanged; no plaintext session file | Real transfer after closing old apps; Windows migration runtime |
 | Credentials | Secret Service and DPAPI implementations; Linux roundtrip and cookie rotation/expiry tests pass | Windows runtime test |
-| Login | Native HttpOnly/redirect/HTML checks pass; live DLSU SSO passes; full mock handoff reaches native task state | Final visual states and cancel/failure recovery review |
-| Six tabs | Implemented; captures of 54 tab/size/text-scale combinations | Full comparison; captures alone are not acceptance |
+| Login | Native HttpOnly, redirect/HTML/invalid-profile rejection and immediate navigation failure pass; live DLSU SSO passes; full mock handoff reaches native task state | Final visual review; Windows cancellation/navigation failure |
+| Six tabs | All nine size/text combinations captured with verified viewport dimensions; extra form/import/day/AI/auth states captured against Electron | Complete visual comparison, including text rasterization, hover, focus and popup details; captures alone are not acceptance |
 | Task cards | Source metrics/fonts/colors, local completion, swipe/double-click/deletion | Final animation, clipping and edge-case review |
-| Task form | Creation and date selection implemented | Exact geometry, datetime popup and validation appearance |
+| Task form | Real pointer/keyboard creation persists and reaches the host; calendar/hour/minute/AM-PM/clear regression passes | Complete datetime popup and validation visual comparison across sizes/platforms |
 | Calendar | Heatmap, navigation, compact/day detail, archive merge, schedule import | Day-detail and import visual states |
 | Settings | Source card grouping, size/text selectors, startup toggle, anchored sync footer | Popup/hover/focus across scales, startup cutover verification |
 | AI | Ollama status/pull/chat/router/estimator; native keyboard reaches mocked chat | Offline/pull/error/long-chat/action visual review |
 | Linux window | Rounded input, compositor fallback, EWMH states, X11/XWayland default, work-area fitting | Dragging, compositor changes, fractional display-scale review |
-| Native host | Full app parenting, hidden startup, bounds/visibility, task roundtrip, pointer/keyboard and shutdown pass | Actual Command Center visual/launcher review and default switch |
-| Command Center | Opt-in integration; 28 existing tests pass | Packaged native resources |
+| Native host | Full app parenting, hidden startup, bounds/visibility, task roundtrip, pointer/keyboard and shutdown pass; actual Command Center navigation, checkbox sync, resize/hide/quit pass | Complete hosted visual comparison and final launcher/default switch |
+| Command Center | Opt-in integration; 28 existing tests pass; explicit candidate build configuration includes both executables, migration bridge and notices | Packaged host smoke check |
 | Windows | Desktop/power/session hooks, DPAPI, font/zoom/geometry branches implemented | Build/runtime validation; WorkerW, Show Desktop and sleep/lock explicitly pending |
-| Distribution | Not released | RPM, AppImage, NSIS, portable builds and smoke checks |
+| Distribution | Linux release RPM/AppImage candidates built and extracted-package launch/helper smoke checks pass; Windows installer/portable recipes prepared | Refresh artifacts after final UI changes; Windows builds/runtime checks; no final release |
 
 Do not mark the rebuild complete or replace the installed version while required acceptance work remains. Windows runtime checks stay pending until a machine is available; never represent an unexecuted check as passing.
