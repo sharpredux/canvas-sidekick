@@ -37,6 +37,8 @@ def click(window,px,py):
     x.XTranslateCoordinates(display,window,root_window,px,py,C.byref(rx),C.byref(ry),C.byref(child))
     x.XSetInputFocus(display,window,1,0);xt.XTestFakeMotionEvent(display,-1,rx.value,ry.value,0)
     xt.XTestFakeButtonEvent(display,1,1,0);xt.XTestFakeButtonEvent(display,1,0,0);x.XFlush(display)
+    # Let the native frame apply focus before injecting text into the next field.
+    time.sleep(.12)
 def type_text(value):
     for letter in value:
         shifted=letter.isupper() or letter==':'
@@ -106,7 +108,11 @@ with tempfile.TemporaryDirectory(prefix='sidekick-full-host-') as temp:
         if process:
             try:os.killpg(process.pid,signal.SIGTERM)
             except ProcessLookupError:pass
-            process.wait(timeout=5)
+            try:process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:os.killpg(process.pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+                process.wait(timeout=5)
             time.sleep(.2)
         subprocess.run(['secret-tool','clear',*attributes],capture_output=True)
 x.XCloseDisplay(display);server.shutdown()
