@@ -1,3 +1,55 @@
+/// Place a browser-style popup using the monitor containing its owner anchor.
+#[cfg(target_os = "linux")]
+pub fn popup_position(anchor: [f32; 4], size: [f32; 2], scale: f32) -> anyhow::Result<[f32; 2]> {
+    use x11rb::{
+        connection::Connection,
+        protocol::{randr::ConnectionExt as _, xproto::*},
+    };
+    let (conn, screen) = x11rb::connect(None)?;
+    let screen = &conn.setup().roots[screen];
+    let point = [
+        (anchor[0] + anchor[2]) * 0.5 * scale,
+        (anchor[1] + anchor[3]) * 0.5 * scale,
+    ];
+    let monitors = conn
+        .randr_get_monitors(screen.root, true)?
+        .reply()?
+        .monitors;
+    let monitor = monitors.iter().find(|m| {
+        point[0] >= m.x as f32
+            && point[0] < (m.x as f32 + m.width as f32)
+            && point[1] >= m.y as f32
+            && point[1] < (m.y as f32 + m.height as f32)
+    });
+    let mut work = monitor
+        .map(|m| [m.x as f32, m.y as f32, m.width as f32, m.height as f32])
+        .unwrap_or([
+            0.,
+            0.,
+            screen.width_in_pixels as f32,
+            screen.height_in_pixels as f32,
+        ]);
+    let atom = conn.intern_atom(false, b"_NET_WORKAREA")?.reply()?.atom;
+    let property = conn
+        .get_property(false, screen.root, atom, AtomEnum::CARDINAL, 0, 4)?
+        .reply()?;
+    if let Some(mut values) = property.value32() {
+        if let (Some(x), Some(y), Some(w), Some(h)) =
+            (values.next(), values.next(), values.next(), values.next())
+        {
+            let left = work[0].max(x as i32 as f32);
+            let top = work[1].max(y as i32 as f32);
+            let right = (work[0] + work[2]).min(x as i32 as f32 + w as f32);
+            let bottom = (work[1] + work[3]).min(y as i32 as f32 + h as f32);
+            if right > left && bottom > top {
+                work = [left, top, right - left, bottom - top];
+            }
+        }
+    }
+    let work = work.map(|value| value / scale);
+    Ok(crate::window_geometry::popup_position(anchor, size, work))
+}
+
 /// Fit desktop pixels to the monitor work area, preserving the legacy top-right first launch.
 #[cfg(target_os = "linux")]
 pub fn fit(xid: u32, size: [f32; 2], scale: f32, initial: bool) -> anyhow::Result<[f32; 4]> {

@@ -12,7 +12,7 @@ try{fixture=JSON.parse(await fs.readFile(path.join(root,`artifacts/${fixtureDire
 catch(error){if(error.code!=='ENOENT')throw error;fixture=JSON.parse(await fs.readFile(path.join(root,'artifacts/ui/fixture.json'),'utf8'));}
 const profile=await fs.mkdtemp(path.join(os.tmpdir(),'sidekick-visual-reference-'));
 const configuration=path.join(profile,'config.json');
-await fs.writeFile(configuration,JSON.stringify({...fixture,profile,hosted:process.argv.includes('--hosted')}));
+await fs.writeFile(configuration,JSON.stringify({...fixture,profile,hosted:process.argv.includes('--hosted'),edge:process.argv.includes('--edge')}));
 const output=path.join(root,process.argv.includes('--hosted')?'artifacts/reference-hosted':'artifacts/reference');await fs.mkdir(output,{recursive:true});
 let app;
 try{
@@ -43,7 +43,31 @@ try{
   if(process.argv.includes('--details')){
    const shot=async name=>{await page.mouse.move(0,0);await page.waitForTimeout(name==='auth-success'?100:200);await page.screenshot({path:path.join(output,`${size}-${textSize}-${name}.png`)});};
    await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.locator('.app-container').hover();await page.locator('.fab').click();await shot('form');
-   if(process.argv.includes('--picker')){const date=page.locator('input[name="date"]');const box=await date.boundingBox();await date.click({position:{x:box.width-20,y:box.height/2}});await shot('form-picker');if(process.argv.includes('--year')){const xid=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getNativeWindowHandle().readUInt32LE(0));const clicked=spawnSync('python3',[path.join(root,'tools/x11-click.py'),String(xid),String(box.x+70),String(box.y+box.height+24)]);if(clicked.status!==0)throw new Error(clicked.stderr.toString());await shot('form-year');}await page.keyboard.press('Escape');await page.keyboard.press('Escape');}
+   if(process.argv.includes('--picker')){
+    const date=page.locator('input[name="date"]');const box=await date.boundingBox();
+    await date.click({position:{x:box.width-20,y:box.height/2}});await shot('form-picker');
+    const xid=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getNativeWindowHandle().readUInt32LE(0));
+    const info=spawnSync('python3',[path.join(root,'tools/query-native-child.py'),String(xid),'--popups'],{encoding:'utf8'});
+    if(info.status!==0)throw new Error(info.stderr);
+    if(process.argv.includes('--popup-info'))await fs.writeFile(path.join(output,`${size}-${textSize}-popup-windows.json`),info.stdout);
+    const picker=JSON.parse(info.stdout).find(window=>window.width===392&&window.height===282);
+    if(!picker)throw new Error(`Native Electron datetime popup is missing: ${info.stdout}`);
+    const capturePicker=name=>{
+     const surface=path.join(output,`${size}-${textSize}-${name}-surface.png`);const target=path.join(output,`${size}-${textSize}-${name}.png`);
+     const captured=spawnSync('import',['-window',String(picker.xid),surface]);
+     if(captured.status!==0)throw new Error(captured.stderr.toString());
+     const geometry=`${picker.x>=0?'+':''}${picker.x}${picker.y>=0?'+':''}${picker.y}`;
+     const composed=spawnSync('magick',[target,surface,'-geometry',geometry,'-compose','Over','-composite',target]);
+     if(composed.status!==0)throw new Error(composed.stderr.toString());
+    };
+    capturePicker('form-picker');
+    if(process.argv.includes('--year')){
+     const clicked=spawnSync('python3',[path.join(root,'tools/x11-click.py'),String(picker.xid),'70','24']);
+     if(clicked.status!==0)throw new Error(clicked.stderr.toString());
+     await shot('form-year');capturePicker('form-year');
+    }
+    await page.keyboard.press('Escape');await page.keyboard.press('Escape');
+   }
    if(process.argv.includes('--required')){await page.getByRole('button',{name:'Add Task',exact:true}).click();await shot('form-required');await page.keyboard.press('Escape');}
    await page.getByRole('button',{name:'Close',exact:true}).click();
    await page.getByRole('button',{name:'Calendar',exact:true}).click();await page.getByRole('button',{name:'Import',exact:true}).click();await shot('import');

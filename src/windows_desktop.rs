@@ -2,6 +2,20 @@
 //! Runtime validation remains pending on a Windows machine.
 use std::{ffi::c_void, ptr};
 type Hwnd = *mut c_void;
+#[repr(C)]
+struct Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+#[repr(C)]
+struct MonitorInfo {
+    size: u32,
+    monitor: Rect,
+    work: Rect,
+    flags: u32,
+}
 const SUBCLASS_ID: usize = 0x43534b;
 #[link(name = "user32")]
 unsafe extern "system" {
@@ -21,6 +35,8 @@ unsafe extern "system" {
         data: isize,
     ) -> i32;
     fn SetParent(child: Hwnd, parent: Hwnd) -> Hwnd;
+    fn MonitorFromRect(rect: *const Rect, flags: u32) -> *mut c_void;
+    fn GetMonitorInfoW(monitor: *mut c_void, info: *mut MonitorInfo) -> i32;
     fn GetWindowLongPtrW(hwnd: Hwnd, index: i32) -> isize;
     fn SetWindowLongPtrW(hwnd: Hwnd, index: i32, value: isize) -> isize;
     fn SetWindowPos(
@@ -60,6 +76,44 @@ unsafe extern "system" {
 }
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+pub fn popup_position(anchor: [f32; 4], size: [f32; 2], scale: f32) -> Option<[f32; 2]> {
+    let rectangle = Rect {
+        left: (anchor[0] * scale) as i32,
+        top: (anchor[1] * scale) as i32,
+        right: (anchor[2] * scale) as i32,
+        bottom: (anchor[3] * scale) as i32,
+    };
+    let monitor = unsafe { MonitorFromRect(&rectangle, 2) };
+    if monitor.is_null() {
+        return None;
+    }
+    let mut info = MonitorInfo {
+        size: std::mem::size_of::<MonitorInfo>() as u32,
+        monitor: Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        },
+        work: Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        },
+        flags: 0,
+    };
+    if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        return None;
+    }
+    let work = [
+        info.work.left as f32 / scale,
+        info.work.top as f32 / scale,
+        (info.work.right - info.work.left) as f32 / scale,
+        (info.work.bottom - info.work.top) as f32 / scale,
+    ];
+    Some(crate::window_geometry::popup_position(anchor, size, work))
 }
 unsafe extern "system" fn find_worker(hwnd: Hwnd, data: isize) -> i32 {
     let shell = unsafe {

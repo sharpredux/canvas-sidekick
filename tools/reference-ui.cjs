@@ -15,7 +15,7 @@ for(const [channel,value] of Object.entries({
 }))ipcMain.handle(channel,event=>value(event));
 ipcMain.handle('ollama-pull',event=>new Promise(resolve=>{event.sender.send('ollama-pull-progress',42);setTimeout(()=>resolve({status:'success'}),30000).unref();}));
 ipcMain.on('save-settings',(_,value)=>{settings={...settings,...value};});
-ipcMain.on('resize-window',(_,size)=>{if(config.hosted)return;const dimensions={Small:[280,320],Medium:[360,520],Large:[480,640]}[size];window.setResizable(true);window.setSize(...dimensions);window.setResizable(false);});
+ipcMain.on('resize-window',(_,size)=>{if(config.hosted)return;const dimensions={Small:[280,320],Medium:[360,520],Large:[480,640]}[size];window.setResizable(true);window.setSize(...dimensions);window.setResizable(false);if(config.edge){const work=require('electron').screen.getPrimaryDisplay().workArea;window.setPosition(work.x+work.width-dimensions[0]-24,work.y+24);}});
 app.whenReady().then(async()=>{
  window=new BrowserWindow({width:config.hosted?650:360,height:config.hosted?500:520,frame:false,transparent:true,resizable:false,webPreferences:{preload:path.resolve(__dirname,'../../canvas-sidekick/electron/preload.js'),contextIsolation:true,nodeIntegration:false}});
  if(config.hosted){

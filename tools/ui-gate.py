@@ -98,7 +98,9 @@ with tempfile.TemporaryDirectory(prefix='sidekick-rust-ui-') as temp:
         xid=ready['xid']
         if hosted:
             send({'type':'bounds','x':0,'y':0,'width':650,'height':500});send({'type':'visible','visible':True})
-        else:raise_window(xid)
+        else:
+            raise_window(xid)
+            if '--edge' not in sys.argv:send({'type':'bounds','x':400,'y':100})
         pointer_outside()
         time.sleep(2)
         state=json.loads((profile/'state.json').read_text())
@@ -107,6 +109,7 @@ with tempfile.TemporaryDirectory(prefix='sidekick-rust-ui-') as temp:
         fixture=json.dumps({'now':now.isoformat(),'settings':json.loads((profile/'settings.json').read_text()),'items':state['items']})
         if not hosted:(output/'fixture.json').write_text(fixture)
         combinations=[('Medium','Standard')]
+        if '--small' in sys.argv:combinations=[('Small','Largest' if '--largest' in sys.argv else 'Standard')]
         if os.environ.get('SIDEKICK_UI_MATRIX')=='1' or '--matrix' in sys.argv:
             combinations=[(size,text) for size in ['Small','Medium','Large'] for text in ['Standard','Larger','Largest']]
             output=root/'artifacts/native';output.mkdir(parents=True,exist_ok=True)
@@ -135,13 +138,39 @@ with tempfile.TemporaryDirectory(prefix='sidekick-rust-ui-') as temp:
                     send(command);time.sleep(.15 if name=='auth-success' else .4)
                     assert process.poll() is None,process.stderr.read()
                     subprocess.run(['import','-window',str(xid),str(output/f'{size}-{text}-{name}.png')],check=True,timeout=10)
+                    if name in ['form-picker','form-year']:
+                        picker=json.loads(subprocess.check_output(['python3',str(root/'tools/query-native-child.py'),str(xid),'--picker'],text=True))
+                        assert picker and (picker['width'],picker['height'])==(392,282), ('Native datetime popup is missing or clipped',picker)
+                        if '--edge' in sys.argv and size=='Small' and not hosted:
+                            assert picker['x']==-125, ('Datetime popup must align its right edge to the input at the screen edge',picker)
+                        surface=output/f'{size}-{text}-{name}-surface.png'
+                        subprocess.run(['import','-window',str(picker['xid']),str(surface)],check=True,timeout=10)
+                        target=output/f'{size}-{text}-{name}.png'
+                        subprocess.run(['magick',str(target),str(surface),'-geometry',f"{picker['x']:+d}{picker['y']:+d}",'-compose','Over','-composite',str(target)],check=True)
+                        if name=='form-picker' and size=='Small':
+                            # Select a date physically below the 320px owner, proving the whole popup works.
+                            local=now.astimezone();offset=(local.replace(day=1).weekday()+1)%7;cell=offset+19
+                            px=11+(cell%7)*28+14;py=74+(cell//7)*28+14
+                            assert picker['y']+py>320, 'Fixture must exercise the popup outside the owner bounds'
+                            subprocess.run(['python3',str(root/'tools/x11-click.py'),str(picker['xid']),str(px),str(py)],check=True)
+                            time.sleep(.15);send({'type':'test-form-state'})
+                            reply=events.get(timeout=5)
+                            while reply.get('type')!='test-form-state':reply=events.get(timeout=5)
+                            assert reply['date'].startswith(local.replace(day=20).strftime('%m/%d/%Y')),reply
                     if name=='ai-offline':
                         # The full setup surface must survive painter-only content.
                         pixel=subprocess.check_output(['magick',str(output/f'{size}-{text}-{name}.png'),'-format','%[pixel:p{20,100}]','info:'],text=True)
                         expected='252,254,253' if hosted else '28,28,30'
                         assert expected in pixel.replace(' ',''), ('AI setup surface collapsed',pixel)
                 send({'type':'test-view','mode':'normal'})
+        if '--details' in sys.argv:
+            send({'type':'test-view','mode':'form-picker'});time.sleep(.4)
+            assert json.loads(subprocess.check_output(['python3',str(root/'tools/query-native-child.py'),str(xid),'--picker'],text=True)), 'Datetime popup did not reopen'
         before=len(requests);send({'type':'visible','visible':False});time.sleep(4.5);assert len(requests)>before,'Background polling stopped while hidden'
+        if '--details' in sys.argv:
+            assert json.loads(subprocess.check_output(['python3',str(root/'tools/query-native-child.py'),str(xid),'--picker'],text=True)) is None, 'Datetime popup remained visible after hiding its owner'
+            send({'type':'visible','visible':True});time.sleep(.4)
+            assert json.loads(subprocess.check_output(['python3',str(root/'tools/query-native-child.py'),str(xid),'--picker'],text=True)) is None, 'Hidden datetime popup reopened with its owner'
         send({'type':'quit'});process.wait(timeout=10)
         assert process.returncode==0,process.stderr.read()
         assert any('/students/submissions' in path for path in requests)

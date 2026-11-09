@@ -6,6 +6,7 @@ pub mod schedule;
 pub mod storage;
 
 pub mod view;
+pub mod window_geometry;
 
 pub mod credentials;
 

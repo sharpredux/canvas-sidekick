@@ -1920,7 +1920,7 @@ impl App {
                 };
                 egui::Image::new(icon).tint(p.text).paint_at(
                     ui,
-                    egui::Rect::from_center_size(center, egui::vec2(18., 18.)),
+                    egui::Rect::from_center_size(center, egui::vec2(14., 14.)),
                 );
                 if ui
                     .interact(
@@ -1960,7 +1960,7 @@ impl App {
                 .unwrap();
             let count = (next - self.month).num_days() as u32;
             let offset = self.month.weekday().num_days_from_sunday();
-            let cell_width = grid_width / 7.;
+            let weekday_width = grid_width / 7.;
             let weekday_y = header.bottom() + 8.;
             for (i, day) in ["S", "M", "T", "W", "T", "F", "S"].iter().enumerate() {
                 let text = text_galley(
@@ -1969,25 +1969,28 @@ impl App {
                     metadata,
                     metadata * 1.4,
                     "medium",
-                    cell_width,
+                    weekday_width,
                     1,
                     p.text.gamma_multiply(0.5),
                     false,
                 );
                 ui.painter().galley(
                     egui::pos2(
-                        grid_start.x + (i as f32 + 0.5) * cell_width - text.size().x / 2.,
+                        grid_start.x + (i as f32 + 0.5) * weekday_width - text.size().x / 2.,
                         weekday_y,
                     ),
                     text,
                     p.text,
                 );
             }
-            let diameter = if cfg!(target_os = "linux") {
+            // CSS grid gaps reduce each column before max-width constrains the circle.
+            let cell_width = (grid_width - 12.) / 7.;
+            let diameter = (if cfg!(target_os = "linux") {
                 28. * scale
             } else {
                 20.
-            };
+            })
+            .min(cell_width);
             let grid_top = weekday_y + metadata * 1.4 + 4.;
             let rows = (offset + count).div_ceil(7);
             for cell in 0..rows * 7 {
@@ -2011,7 +2014,7 @@ impl App {
                     [day.weekday().num_days_from_sunday() as usize];
                 let class = parsed_courses.iter().any(|c| c.day == name);
                 let center = egui::pos2(
-                    grid_start.x + (cell % 7) as f32 * cell_width + cell_width / 2.,
+                    grid_start.x + (cell % 7) as f32 * (cell_width + 2.) + cell_width / 2.,
                     grid_top + (cell / 7) as f32 * (diameter + 2.) + diameter / 2.,
                 );
                 let (fill, border, text) = if completed {
@@ -2244,8 +2247,7 @@ impl App {
                 16.
             };
             let height = line + 14.;
-            let y =
-                (self.body_bottom(ui.ctx()) - 4. - height).max(ui.next_widget_position().y + 4.);
+            let y = (self.body_bottom(ui.ctx()) - 4. - height).max(ui.min_rect().bottom() + 4.);
             let mut right = grid_start.x + grid_width;
             for (label, schedule) in [("Import", false), ("Schedule", true)] {
                 let color = if schedule { p.primary } else { Color32::BLACK };
@@ -2455,7 +2457,7 @@ impl App {
         let width = ui.available_width() - 8.;
         let bottom = self.body_bottom(ui.ctx()) - 4.;
         let count = schedule::parse(&self.schedule_text).len();
-        let title_width = text_galley(
+        let natural_title = text_galley(
             ui,
             "Smart Import",
             title_size,
@@ -2465,11 +2467,10 @@ impl App {
             1,
             p.primary,
             false,
-        )
-        .size()
-        .x;
+        );
+        let title_width = natural_title.size().x;
         let count_label = format!("{count} detected");
-        let count_width = if count > 0 {
+        let natural_count = (count > 0).then(|| {
             text_galley(
                 ui,
                 &count_label,
@@ -2481,38 +2482,46 @@ impl App {
                 secondary,
                 false,
             )
-            .size()
-            .x
-        } else {
-            0.
-        };
+        });
+        let count_width = natural_count
+            .as_ref()
+            .map(|text| text.size().x)
+            .unwrap_or(0.);
         let available = width - 8.;
         let left_basis = 34. + title_width;
         let deficit = (left_basis + count_width - available).max(0.);
         let left_width = left_basis - deficit * left_basis / (left_basis + count_width);
-        let import_title = text_galley(
-            ui,
-            "Smart Import",
-            title_size,
-            title_line,
-            "semibold",
-            left_width - 34.,
-            usize::MAX,
-            p.primary,
-            false,
-        );
-        let import_count = (count > 0).then(|| {
+        let import_title = if deficit == 0. {
+            natural_title
+        } else {
             text_galley(
                 ui,
-                &count_label,
-                meta,
-                meta_line,
-                "medium",
-                (available - left_width).max(1.),
+                "Smart Import",
+                title_size,
+                title_line,
+                "semibold",
+                left_width - 34.,
                 usize::MAX,
-                secondary,
+                p.primary,
                 false,
             )
+        };
+        let import_count = natural_count.map(|natural| {
+            if deficit == 0. {
+                natural
+            } else {
+                text_galley(
+                    ui,
+                    &count_label,
+                    meta,
+                    meta_line,
+                    "medium",
+                    (available - left_width).max(1.),
+                    usize::MAX,
+                    secondary,
+                    false,
+                )
+            }
         });
         let header_height = if self.import_schedule {
             (meta_line + 10.).max(title_line)
@@ -2679,9 +2688,14 @@ impl App {
                 p.primary,
             );
             if let Some(text) = import_count {
+                let count_box_width = if deficit == 0. {
+                    text.size().x
+                } else {
+                    (available - left_width).max(1.)
+                };
                 ui.painter().galley(
                     egui::pos2(
-                        header.right() - 4. - (available - left_width).max(1.),
+                        header.right() - 4. - count_box_width,
                         header.center().y - text.size().y / 2.,
                     ),
                     text,

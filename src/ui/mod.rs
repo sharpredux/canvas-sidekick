@@ -131,6 +131,7 @@ struct Form {
     picker_years: bool,
     picker_expanded_year: i32,
     picker_year_scroll: bool,
+    picker_has_focus: bool,
     error: Option<String>,
 }
 pub struct App {
@@ -911,6 +912,9 @@ impl eframe::App for App {
             }
         }
         if self.hosted && ctx.input(|i| i.viewport().close_requested()) {
+            if let Some(form) = &mut self.form {
+                form.picker_open = false;
+            }
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             println!("{}", json!({"v":1,"type":"close-request"}));
@@ -1021,6 +1025,13 @@ impl eframe::App for App {
                     }
                 }
                 #[cfg(debug_assertions)]
+                Some("test-form-state") => {
+                    println!(
+                        "{}",
+                        json!({"v":1,"type":"test-form-state","date":self.form.as_ref().map(|form|form.date.as_str())})
+                    );
+                }
+                #[cfg(debug_assertions)]
                 Some("test-login") => {
                     if let Some(url) = command["url"].as_str() {
                         self.auth_url = url.into();
@@ -1061,9 +1072,15 @@ impl eframe::App for App {
                         )));
                     }
                 }
-                Some("visible") => ctx.send_viewport_cmd(egui::ViewportCommand::Visible(
-                    command["visible"].as_bool().unwrap_or(false),
-                )),
+                Some("visible") => {
+                    let visible = command["visible"].as_bool().unwrap_or(false);
+                    if !visible {
+                        if let Some(form) = &mut self.form {
+                            form.picker_open = false;
+                        }
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(visible));
+                }
                 Some("toggle") => {
                     if let Some(id) = command["id"].as_str() {
                         self.toggle(id);
@@ -1234,17 +1251,33 @@ impl eframe::App for App {
                             self.ai(ui);
                         });
                 } else {
+                    // CSS scrolls the content padding along with its children. Keep
+                    // the viewport below the tabs and extend it to the inner bezel.
+                    let start = ui.next_widget_position();
+                    let viewport = egui::Rect::from_min_max(
+                        egui::pos2(start.x, start.y - 8.),
+                        egui::pos2(ui.max_rect().right(), ctx.content_rect().bottom() - 1.),
+                    );
+                    let mut content_ui = ui.new_child(
+                        egui::UiBuilder::new().id_salt("content-viewport").max_rect(viewport),
+                    );
+                    let mut clip = ctx.content_rect().shrink(1.);
+                    clip.min.y = viewport.top();
+                    content_ui.set_clip_rect(clip);
                     egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                         .id_salt(("content", self.tab))
-                        .max_height(height.max(40.))
-                        .show(ui, |ui| {
+                        .max_height(viewport.height().max(40.))
+                        .show(&mut content_ui, |ui| {
                             ui.set_min_width(ui.available_width());
+                            ui.add_space(8.);
                             match self.tab {
                                 0 => self.ai(ui),
                                 1 => self.calendar(ui),
                                 5 => self.settings_screen(ui),
                                 _ => self.agenda(ui),
                             }
+                            let bottom_padding = if self.settings.size == "Small" {12.} else {16.};
+                            ui.add_space(bottom_padding - ui.spacing().item_spacing.y);
                         });
                 }
                 if show_add {

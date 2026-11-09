@@ -32,6 +32,7 @@ impl Form {
         self.picker_years = false;
         self.picker_expanded_year = self.picker.year();
         self.picker_year_scroll = false;
+        self.picker_has_focus = false;
         self.picker_open = true;
     }
     fn commit_picker(&mut self) {
@@ -169,17 +170,99 @@ impl Form {
         if !self.picker_open {
             return;
         }
-        let popup = egui::Rect::from_min_size(anchor.left_bottom(), egui::vec2(392., 283.));
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && self.picker_years {
-            self.picker_years = false;
+        if ctx.embed_viewports() {
+            self.draw_date_popup(ctx, anchor);
             return;
         }
+        if ctx.input(|input| {
+            input.pointer.any_pressed()
+                && input
+                    .pointer
+                    .interact_pos()
+                    .is_some_and(|point| !anchor.contains(point))
+        }) {
+            self.picker_open = false;
+            return;
+        }
+        let owner = ctx
+            .input(|input| input.viewport().inner_rect.or(input.viewport().outer_rect))
+            .unwrap_or(ctx.content_rect());
+        let global = anchor.translate(owner.min.to_vec2());
+        let size = egui::vec2(392., 282.);
+        let position = global.left_bottom();
+        #[cfg(target_os = "windows")]
+        let position = canvas_sidekick_rust::windows_desktop::popup_position(
+            [global.left(), global.top(), global.right(), global.bottom()],
+            [size.x, size.y],
+            ctx.pixels_per_point(),
+        )
+        .map(|p| egui::pos2(p[0], p[1]))
+        .unwrap_or(position);
+        #[cfg(target_os = "linux")]
+        let position = canvas_sidekick_rust::desktop::popup_position(
+            [global.left(), global.top(), global.right(), global.bottom()],
+            [size.x, size.y],
+            ctx.pixels_per_point(),
+        )
+        .map(|p| egui::pos2(p[0], p[1]))
+        .unwrap_or(position);
+        let id = egui::ViewportId::from_hash_of("canvas-sidekick-datetime");
+        ctx.show_viewport_immediate(
+            id,
+            egui::ViewportBuilder::default()
+                .with_title("Canvas Sidekick date picker")
+                .with_position(position)
+                .with_inner_size(size)
+                .with_decorations(false)
+                .with_resizable(false)
+                .with_taskbar(false)
+                .with_active(true)
+                .with_window_level(egui::WindowLevel::AlwaysOnTop)
+                .with_window_type(egui::X11WindowType::PopupMenu),
+            |popup_ctx, class| {
+                if class == egui::ViewportClass::Embedded {
+                    self.draw_date_popup(popup_ctx, anchor);
+                    return;
+                }
+                let focused = popup_ctx.input(|input| input.viewport().focused.unwrap_or(false));
+                if focused {
+                    self.picker_has_focus = true;
+                }
+                if self.picker_has_focus && !focused
+                    || popup_ctx.input(|input| input.viewport().close_requested())
+                {
+                    self.picker_open = false;
+                }
+                if self.picker_open {
+                    self.draw_date_popup(
+                        popup_ctx,
+                        egui::Rect::from_min_max(egui::pos2(0., -1.), egui::Pos2::ZERO),
+                    );
+                }
+                if !self.picker_open {
+                    popup_ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            },
+        );
+    }
+    fn draw_date_popup(&mut self, ctx: &egui::Context, anchor: egui::Rect) {
+        if !self.picker_open {
+            return;
+        }
+        let popup = egui::Rect::from_min_size(anchor.left_bottom(), egui::vec2(392., 282.));
+        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            if self.picker_years {
+                self.picker_years = false;
+            } else {
+                self.picker_open = false;
+                return;
+            }
+        }
         if ctx.input(|i| {
-            i.key_pressed(egui::Key::Escape)
-                || i.pointer.any_pressed()
-                    && i.pointer
-                        .interact_pos()
-                        .is_some_and(|point| !popup.contains(point) && !anchor.contains(point))
+            i.pointer.any_pressed()
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|point| !popup.contains(point) && !anchor.contains(point))
         }) {
             self.picker_open = false;
             return;
