@@ -1,0 +1,159 @@
+//! Win32 desktop parenting and power/session recovery, translated from the Electron host.
+//! Runtime validation remains pending on a Windows machine.
+use std::{ffi::c_void, ptr};
+type Hwnd = *mut c_void;
+const SUBCLASS_ID: usize = 0x43534b;
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn FindWindowW(class: *const u16, title: *const u16) -> Hwnd;
+    fn FindWindowExW(parent: Hwnd, after: Hwnd, class: *const u16, title: *const u16) -> Hwnd;
+    fn SendMessageTimeoutW(
+        hwnd: Hwnd,
+        message: u32,
+        wparam: usize,
+        lparam: isize,
+        flags: u32,
+        timeout: u32,
+        result: *mut usize,
+    ) -> isize;
+    fn EnumWindows(
+        callback: Option<unsafe extern "system" fn(Hwnd, isize) -> i32>,
+        data: isize,
+    ) -> i32;
+    fn SetParent(child: Hwnd, parent: Hwnd) -> Hwnd;
+    fn ShowWindow(hwnd: Hwnd, command: i32) -> i32;
+    fn SetTimer(hwnd: Hwnd, id: usize, elapsed: u32, callback: *const c_void) -> usize;
+    fn KillTimer(hwnd: Hwnd, id: usize) -> i32;
+    fn RegisterSuspendResumeNotification(recipient: Hwnd, flags: u32) -> *mut c_void;
+    fn UnregisterSuspendResumeNotification(handle: *mut c_void) -> i32;
+}
+#[link(name = "comctl32")]
+unsafe extern "system" {
+    fn SetWindowSubclass(
+        hwnd: Hwnd,
+        callback: Option<unsafe extern "system" fn(Hwnd, u32, usize, isize, usize, usize) -> isize>,
+        id: usize,
+        data: usize,
+    ) -> i32;
+    fn RemoveWindowSubclass(
+        hwnd: Hwnd,
+        callback: Option<unsafe extern "system" fn(Hwnd, u32, usize, isize, usize, usize) -> isize>,
+        id: usize,
+    ) -> i32;
+    fn DefSubclassProc(hwnd: Hwnd, message: u32, wparam: usize, lparam: isize) -> isize;
+}
+#[link(name = "wtsapi32")]
+unsafe extern "system" {
+    fn WTSRegisterSessionNotification(hwnd: Hwnd, flags: u32) -> i32;
+    fn WTSUnRegisterSessionNotification(hwnd: Hwnd) -> i32;
+}
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+unsafe extern "system" fn find_worker(hwnd: Hwnd, data: isize) -> i32 {
+    let shell = unsafe {
+        FindWindowExW(
+            hwnd,
+            ptr::null_mut(),
+            wide("SHELLDLL_DefView").as_ptr(),
+            ptr::null(),
+        )
+    };
+    if !shell.is_null() {
+        let worker =
+            unsafe { FindWindowExW(ptr::null_mut(), hwnd, wide("WorkerW").as_ptr(), ptr::null()) };
+        unsafe { *(data as *mut Hwnd) = worker };
+        return 0;
+    }
+    1
+}
+unsafe fn embed(hwnd: Hwnd) {
+    let progman = unsafe { FindWindowW(wide("Progman").as_ptr(), ptr::null()) };
+    if progman.is_null() {
+        return;
+    }
+    let mut result = 0;
+    unsafe { SendMessageTimeoutW(progman, 0x052c, 0, 0, 2, 1000, &mut result) };
+    let mut worker: Hwnd = ptr::null_mut();
+    unsafe { EnumWindows(Some(find_worker), (&mut worker as *mut Hwnd) as isize) };
+    if !worker.is_null() {
+        unsafe { SetParent(hwnd, worker) };
+    }
+}
+struct Hook {
+    power: *mut c_void,
+}
+unsafe extern "system" fn window_proc(
+    hwnd: Hwnd,
+    message: u32,
+    wparam: usize,
+    lparam: isize,
+    _id: usize,
+    data: usize,
+) -> isize {
+    match message {
+        0x0005 if wparam == 1 => {
+            unsafe { ShowWindow(hwnd, 9) };
+        } // Keep the widget visible after Show Desktop.
+        0x0218 if wparam == 4 => {
+            unsafe {
+                KillTimer(hwnd, SUBCLASS_ID);
+                SetParent(hwnd, ptr::null_mut())
+            };
+        }
+        0x0218 if wparam == 7 || wparam == 18 => {
+            unsafe {
+                KillTimer(hwnd, SUBCLASS_ID);
+                SetTimer(hwnd, SUBCLASS_ID, 1500, ptr::null())
+            };
+        }
+        0x02b1 if wparam == 7 => {
+            unsafe {
+                KillTimer(hwnd, SUBCLASS_ID);
+                SetParent(hwnd, ptr::null_mut())
+            };
+        }
+        0x02b1 if wparam == 8 => {
+            unsafe {
+                KillTimer(hwnd, SUBCLASS_ID);
+                SetTimer(hwnd, SUBCLASS_ID, 1500, ptr::null())
+            };
+        }
+        0x0113 if wparam == SUBCLASS_ID => {
+            unsafe {
+                KillTimer(hwnd, SUBCLASS_ID);
+                embed(hwnd)
+            };
+        }
+        0x0082 => {
+            unsafe {
+                RemoveWindowSubclass(hwnd, Some(window_proc), SUBCLASS_ID);
+                WTSUnRegisterSessionNotification(hwnd)
+            };
+            let hook = unsafe { Box::from_raw(data as *mut Hook) };
+            if !hook.power.is_null() {
+                unsafe { UnregisterSuspendResumeNotification(hook.power) };
+            }
+        }
+        _ => {}
+    }
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+}
+pub fn attach(hwnd: usize, parent: Option<usize>) {
+    let hwnd = hwnd as Hwnd;
+    if let Some(parent) = parent {
+        unsafe { SetParent(hwnd, parent as Hwnd) };
+        return;
+    }
+    unsafe { embed(hwnd) };
+    let power = unsafe { RegisterSuspendResumeNotification(hwnd, 0) };
+    let hook = Box::into_raw(Box::new(Hook { power }));
+    if unsafe { SetWindowSubclass(hwnd, Some(window_proc), SUBCLASS_ID, hook as usize) } == 0 {
+        let hook = unsafe { Box::from_raw(hook) };
+        if !hook.power.is_null() {
+            unsafe { UnregisterSuspendResumeNotification(hook.power) };
+        }
+    } else {
+        unsafe { WTSRegisterSessionNotification(hwnd, 0) };
+    }
+}

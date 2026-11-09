@@ -1,0 +1,62 @@
+[package]
+name = "canvas-sidekick-rust"
+version = "0.1.7"
+edition = "2024"
+
+[features]
+default = ["desktop"]
+desktop = ["dep:eframe", "dep:x11rb", "dep:raw-window-handle", "dep:egui_extras", "dep:winit"]
+auth = ["dep:wry", "dep:tao"]
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls", "stream"] }
+cookie_store = "0.22"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+url = "2"
+fs2 = "0.4"
+eframe = { version = "0.33", default-features = false, features = ["glow", "x11", "wayland", "default_fonts", "accesskit"], optional = true }
+egui_extras = { version = "0.33", default-features = false, features = ["svg", "datepicker"], optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+x11rb = { version = "0.13", features = ["shape", "randr"], optional = true }
+winit = { version = "0.30", default-features = false, features = ["x11", "wayland"], optional = true }
+wry = { version = "0.53", optional = true }
+tao = { version = "0.34", optional = true }
+
+tempfile = "3"
+
+[dev-dependencies]
+
+[[bin]]
+name = "canvas-sidekick"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "native-window-gate"
+path = "src/bin/window-gate.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "parity-driver"
+path = "src/bin/parity-driver.rs"
+
+[[bin]]
+name = "canvas-sidekick-auth"
+path = "src/bin/auth.rs"
+required-features = ["auth"]
+
+[profile.dev.package.gtk]
+debug = 0
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false

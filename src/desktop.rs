@@ -1,0 +1,182 @@
+/// Fit desktop pixels to the monitor work area, preserving the legacy top-right first launch.
+#[cfg(target_os = "linux")]
+pub fn fit(xid: u32, size: [f32; 2], scale: f32, initial: bool) -> anyhow::Result<[f32; 4]> {
+    use x11rb::{
+        connection::Connection,
+        protocol::{randr::ConnectionExt as _, xproto::*},
+    };
+    let (conn, screen) = x11rb::connect(None)?;
+    let screen = &conn.setup().roots[screen];
+    let geo = conn.get_geometry(xid)?.reply()?;
+    let point = conn
+        .translate_coordinates(xid, screen.root, 0, 0)?
+        .reply()?;
+    let monitors = conn
+        .randr_get_monitors(screen.root, true)?
+        .reply()?
+        .monitors;
+    let area = |m: &x11rb::protocol::randr::MonitorInfo| {
+        [m.x as f32, m.y as f32, m.width as f32, m.height as f32]
+    };
+    let mut work = if initial {
+        monitors
+            .iter()
+            .find(|m| m.primary)
+            .or(monitors.first())
+            .map(area)
+    } else {
+        monitors
+            .iter()
+            .max_by_key(|m| {
+                let width = (i32::from(m.x) + i32::from(m.width))
+                    .min(i32::from(point.dst_x) + i32::from(geo.width))
+                    - i32::from(m.x).max(i32::from(point.dst_x));
+                let height = (i32::from(m.y) + i32::from(m.height))
+                    .min(i32::from(point.dst_y) + i32::from(geo.height))
+                    - i32::from(m.y).max(i32::from(point.dst_y));
+                width.max(0) * height.max(0)
+            })
+            .map(area)
+    }
+    .unwrap_or([
+        0.,
+        0.,
+        screen.width_in_pixels as f32,
+        screen.height_in_pixels as f32,
+    ]);
+    let atom = conn.intern_atom(false, b"_NET_WORKAREA")?.reply()?.atom;
+    let property = conn
+        .get_property(false, screen.root, atom, AtomEnum::CARDINAL, 0, 4)?
+        .reply()?;
+    if let Some(mut values) = property.value32() {
+        if let (Some(x), Some(y), Some(w), Some(h)) =
+            (values.next(), values.next(), values.next(), values.next())
+        {
+            let left = work[0].max(x as i32 as f32);
+            let top = work[1].max(y as i32 as f32);
+            let right = (work[0] + work[2]).min(x as i32 as f32 + w as f32);
+            let bottom = (work[1] + work[3]).min(y as i32 as f32 + h as f32);
+            if right > left && bottom > top {
+                work = [left, top, right - left, bottom - top];
+            }
+        }
+    }
+    let width = (size[0] * scale).min(work[2]);
+    let height = (size[1] * scale).min(work[3]);
+    let x = if initial {
+        work[0] + work[2] - width - 24. * scale
+    } else {
+        point.dst_x as f32
+    };
+    let y = if initial {
+        work[1] + 24. * scale
+    } else {
+        point.dst_y as f32
+    };
+    Ok([
+        x.clamp(work[0], work[0] + work[2] - width),
+        y.clamp(work[1], work[1] + work[3] - height),
+        width,
+        height,
+    ])
+}
+
+#[cfg(target_os = "linux")]
+pub fn shape(xid: u32, scale: f32, parent: Option<u32>, attach: bool) -> anyhow::Result<()> {
+    use x11rb::{
+        connection::Connection,
+        protocol::{
+            shape::{self, ConnectionExt as _},
+            xproto::*,
+        },
+    };
+    let (conn, screen) = x11rb::connect(None)?;
+    let root = conn.setup().roots[screen].root;
+    let atom = |name: &str| -> anyhow::Result<u32> {
+        Ok(conn.intern_atom(false, name.as_bytes())?.reply()?.atom)
+    };
+    if let Some(parent) = parent {
+        if attach {
+            conn.reparent_window(xid, parent, 0, 0)?.check()?;
+        }
+    } else if attach {
+        for names in [
+            ["_NET_WM_STATE_BELOW", "_NET_WM_STATE_STICKY"],
+            ["_NET_WM_STATE_SKIP_TASKBAR", "_NET_WM_STATE_SKIP_PAGER"],
+        ] {
+            let event = ClientMessageEvent::new(
+                32,
+                xid,
+                atom("_NET_WM_STATE")?,
+                ClientMessageData::from([1, atom(names[0])?, atom(names[1])?, 1, 0]),
+            );
+            conn.send_event(
+                false,
+                root,
+                EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+                event,
+            )?
+            .check()?;
+        }
+    }
+    let geometry = conn.get_geometry(xid)?.reply()?;
+    let width = geometry.width;
+    let height = geometry.height;
+    let r = (24. * scale).round().min(width.min(height) as f32 / 2.) as i16;
+    let mut rectangles = Vec::new();
+    for y in 0..r {
+        let d = r as f32 - y as f32 - 0.5;
+        let inset = (r as f32 - ((r * r) as f32 - d * d).sqrt()).round() as i16;
+        let row = Rectangle {
+            x: inset,
+            y,
+            width: width - 2 * inset as u16,
+            height: 1,
+        };
+        rectangles.push(row);
+        rectangles.push(Rectangle {
+            y: height as i16 - y - 1,
+            ..row
+        });
+    }
+    if height > 2 * r as u16 {
+        rectangles.push(Rectangle {
+            x: 0,
+            y: r,
+            width,
+            height: height - 2 * r as u16,
+        });
+    }
+    let composited = conn
+        .get_selection_owner(atom(&format!("_NET_WM_CM_S{screen}"))?)?
+        .reply()?
+        .owner
+        != 0;
+    if composited {
+        conn.shape_mask(shape::SO::SET, shape::SK::BOUNDING, xid, 0, 0, x11rb::NONE)?
+            .check()?;
+    } else {
+        conn.shape_rectangles(
+            shape::SO::SET,
+            shape::SK::BOUNDING,
+            ClipOrdering::UNSORTED,
+            xid,
+            0,
+            0,
+            &rectangles,
+        )?
+        .check()?;
+    }
+    conn.shape_rectangles(
+        shape::SO::SET,
+        shape::SK::INPUT,
+        ClipOrdering::UNSORTED,
+        xid,
+        0,
+        0,
+        &rectangles,
+    )?
+    .check()?;
+    conn.flush()?;
+    Ok(())
+}

@@ -1,0 +1,5 @@
+[build]
+jobs = 1
+
+[env]
+PKG_CONFIG_PATH = { value = ".sdk/root/usr/lib64/pkgconfig", relative = true, force = false }

@@ -1,0 +1,818 @@
+:root {
+  /* watchOS / SF Compact Typography */
+  --tab-btn-size: 32px;
+  --tab-btn-gap: 8px;
+  --tab-padding-x: 16px;
+  --md-sys-typescale-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  
+  --md-sys-typescale-title-large: 600 20px/24px var(--md-sys-typescale-font);
+  --md-sys-typescale-title-medium: 600 16px/20px var(--md-sys-typescale-font);
+  --md-sys-typescale-title-small: 600 14px/18px var(--md-sys-typescale-font);
+  
+  --md-sys-typescale-body-large: 400 16px/20px var(--md-sys-typescale-font);
+  --md-sys-typescale-body-medium: 400 14px/18px var(--md-sys-typescale-font);
+  --md-sys-typescale-body-small: 400 12px/16px var(--md-sys-typescale-font);
+  
+  --md-sys-typescale-label-large: 500 14px/18px var(--md-sys-typescale-font);
+  --md-sys-typescale-label-medium: 500 12px/16px var(--md-sys-typescale-font);
+  --md-sys-typescale-label-small: 500 11px/14px var(--md-sys-typescale-font);
+  
+  /* MD3 Shape Scale */
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large: 16px;
+  --md-sys-shape-corner-extra-large: 28px;
+  --md-sys-shape-corner-full: 9999px;
+
+  /* MD3 Elevation */
+  --md-sys-elevation-level-0: none;
+  --md-sys-elevation-level-1: 0px 1px 2px 0px rgba(0,0,0,0.3), 0px 1px 3px 1px rgba(0,0,0,0.15);
+  --md-sys-elevation-level-2: 0px 1px 2px 0px rgba(0,0,0,0.3), 0px 2px 6px 2px rgba(0,0,0,0.15);
+  --md-sys-elevation-level-3: 0px 1px 3px 0px rgba(0,0,0,0.3), 0px 4px 8px 3px rgba(0,0,0,0.15);
+
+  /* watchOS Colors (Pure Black for OLED) */
+  --md-sys-color-background: #000000;
+  --md-sys-color-surface: #000000;
+  --md-sys-color-surface-container: #000000; /* Pure black widget */
+  --md-sys-color-surface-container-high: #1c1c1e; /* Subtle watchOS gray */
+  
+  --md-sys-color-on-surface: #FFFFFF;
+  --md-sys-color-on-surface-variant: #98989d;
+  
+  /* WatchOS Hyper-Saturated Palette */
+  --md-sys-color-primary: #32ADE6; /* Vibrant Cyan */
+  --md-sys-color-on-primary: #000000;
+  --md-sys-color-primary-container: #34C759; /* Neon Green */
+  --md-sys-color-on-primary-container: #000000;
+  
+  --md-sys-color-secondary: #CCC2DC;
+  --md-sys-color-error: #FF453A; /* watchOS Red */
+  --md-sys-color-outline-variant: #333333;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+  color: var(--md-sys-color-on-surface);
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: var(--md-sys-typescale-font);
+}
+
+.app-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  background: var(--md-sys-color-surface-container);
+  border-radius: var(--md-sys-shape-corner-extra-large);
+  border: 1px solid #333333; /* subtle edge for dark modes */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  isolation: isolate;
+  box-sizing: border-box;
+}
+
+.widget-header {
+  
+  padding: 6px 8px 4px 8px; /* Extremely tight padding for watchOS */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.widget-title {
+  margin: 0;
+  font: var(--md-sys-typescale-label-small);
+  color: var(--md-sys-color-on-surface-variant);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.header-icons {
+  
+  display: flex;
+  gap: 12px;
+}
+
+.header-btn {
+  background: transparent;
+  border: none;
+  color: var(--md-sys-color-on-surface-variant);
+  cursor: pointer;
+  padding: 8px; /* Increased from 4px for watchOS touch targets */
+  border-radius: var(--md-sys-shape-corner-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.header-btn:hover {
+  background-color: var(--md-sys-color-surface-container-high);
+}
+
+.close-btn {
+  background: transparent;
+  border: 2px solid transparent;
+  color: var(--md-sys-color-on-surface-variant);
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: border-color 0.2s, color 0.2s, background-color 0.2s;
+  outline: none;
+}
+
+.close-btn:hover {
+  border-color: var(--md-sys-color-error);
+  background-color: var(--md-sys-color-error); /* Solid red circle */
+  color: #000000; /* Contrast */
+}
+
+.compact-top-bar {
+  display: flex;
+  flex-direction: column;
+  background: #000000;
+  border-bottom: none;
+  border-top-left-radius: var(--md-sys-shape-corner-extra-large);
+  border-top-right-radius: var(--md-sys-shape-corner-extra-large);
+}
+
+.tabs {
+  
+  display: flex;
+  padding: 8px var(--tab-padding-x) 4px var(--tab-padding-x); /* Safe-area margin for corners */
+  gap: 12px;
+}
+
+.segment-container {
+  position: relative;
+  display: flex;
+  gap: var(--tab-btn-gap); /* Responsive gap */
+  
+}
+
+@keyframes appleGradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.gliding-pill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--tab-btn-size); /* Responsive width */
+  background: var(--md-sys-color-primary-container);
+  border-radius: calc(var(--tab-btn-size) / 2); /* Pill shape */
+  transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+  z-index: 0;
+  overflow: hidden;
+}
+
+.gliding-pill::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(135deg, #007aff, #34c759, #00c7ba, #007aff);
+  background-size: 300% 300%;
+  animation: appleGradient 8s ease infinite;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: -1;
+}
+
+.gliding-pill.ai-active::before {
+  opacity: 1;
+}
+
+.segment-btn {
+  width: var(--tab-btn-size);
+  height: var(--tab-btn-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+  color: var(--md-sys-color-on-surface-variant);
+  transition: color 0.2s;
+  padding: 0;
+  border-radius: calc(var(--tab-btn-size) / 2);
+}
+
+.segment-btn.active {
+  color: #000000;
+}
+
+.segment-btn.active.ai-active-btn {
+  color: #ffffff;
+}
+
+.content-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px 16px 12px; /* Prevent scroll bleed into bezels, added top breathing room */
+  
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+.agenda-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px; /* Squeezed to compensate for lateral padding */
+}
+
+.agenda-item-card {
+  padding: 10px 12px;
+  border-radius: 14px;
+  gap: 4px;
+}
+
+.subject-pill {
+  padding: 6px 12px;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-label-small);
+}
+
+.time-col {
+  min-width: 35px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-top: 4px;
+}
+
+.time-primary {
+  font: var(--md-sys-typescale-label-medium);
+  color: var(--md-sys-color-on-surface);
+}
+
+.time-primary.urgent {
+  color: var(--md-sys-color-error);
+}
+
+.time-secondary {
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.content-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--md-sys-color-surface-container-high);
+  padding: 8px 8px; /* Squeezed */
+  border-radius: var(--md-sys-shape-corner-large);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.item-title {
+  font: var(--md-sys-typescale-title-small);
+  margin: 2px 0;
+  color: var(--md-sys-color-on-surface);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.item-estimate {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  align-items: center;
+}
+
+.item-estimate-text {
+  font: var(--md-sys-typescale-label-small);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.item-course {
+  font: var(--md-sys-typescale-label-small);
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.item-preview {
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+  margin: 4px 0 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.item-author {
+  font: var(--md-sys-typescale-label-small);
+  margin-top: 4px;
+}
+
+.zoom-item-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.zoom-item-course {
+  font: var(--md-sys-typescale-title-small);
+}
+
+.item-time-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-left: 8px;
+}
+
+.item-time-text {
+  font: var(--md-sys-typescale-label-small);
+  font-weight: 600;
+}
+
+.item-action-btn {
+  width: 44px;
+  height: calc(100% - 8px);
+  background: #ff3b30;
+  border-radius: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 2px 8px rgba(255, 59, 48, 0.3);
+  transition: transform 0.1s ease;
+  margin-right: 6px;
+}
+
+.updates-filters {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 0px 0px 8px 0px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+  flex-shrink: 0;
+}
+
+.updates-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.updates-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  height: 100%;
+  opacity: 0.5;
+  gap: 8px;
+}
+
+.updates-empty-text {
+  font: var(--md-sys-typescale-body-medium);
+  color: var(--md-sys-color-on-surface);
+}
+
+.md-pill {
+  display: inline-flex;
+  align-items: center;
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  font: var(--md-sys-typescale-label-small);
+  padding: 4px 10px;
+  border-radius: var(--md-sys-shape-corner-full);
+  margin-top: 8px;
+  width: fit-content;
+}
+
+.md-checkbox {
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+  border: 2px solid var(--md-sys-color-on-surface-variant);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-top: 14px;
+}
+
+.md-checkbox.checked {
+  background: var(--md-sys-color-primary);
+  border-color: var(--md-sys-color-primary);
+}
+
+.checked-state .content-col {
+  opacity: 0.6;
+}
+.checked-state .item-title {
+  text-decoration: line-through;
+}
+
+.fab {
+  position: absolute;
+  bottom: 16px; /* Safe-area offset */
+  right: 16px; /* Safe-area offset */
+  width: 36px;
+  height: 36px;
+  border-radius: var(--md-sys-shape-corner-full); /* Perfectly circular */
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  
+  transition: background-color 0.2s, opacity 0.3s ease, transform 0.3s ease;
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+}
+
+.app-container:hover .fab {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.fab:hover {
+  background-color: var(--md-sys-color-primary);
+}
+
+/* Predictive Skeleton Loader */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-block {
+  background: linear-gradient(90deg, 
+    var(--md-sys-color-surface-container-high) 25%, 
+    #2c2c2e 50%, 
+    var(--md-sys-color-surface-container-high) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: var(--md-sys-shape-corner-small);
+}
+
+/* Compact Mode for Small Widget */
+.app-container.compact-mode {
+  border-radius: 40px;
+  --tab-btn-size: 26px; /* Shrink button to fit compact layout */
+  --tab-btn-gap: 4px;   /* Shrink gap between buttons */
+  --tab-padding-x: 8px; /* Tighter padding for tab area */
+  
+  /* Scale down typography for compact layout so multiple items fit */
+  --md-sys-typescale-title-small: 600 14px/18px var(--md-sys-typescale-font);
+  --md-sys-typescale-label-medium: 500 10px/14px var(--md-sys-typescale-font);
+  --md-sys-typescale-label-small: 500 9px/12px var(--md-sys-typescale-font);
+  --md-sys-typescale-body-small: 400 9px/12px var(--md-sys-typescale-font);
+}
+.app-container.compact-mode .content-area {
+  padding: 8px 12px 12px 12px;
+  justify-content: flex-start;
+}
+
+/* Smartwatch-style layout optimizations */
+.app-container.compact-mode .agenda-item-card {
+  padding: 8px 10px;
+  border-radius: 10px;
+  gap: 2px;
+}
+
+.app-container.compact-mode .item-estimate,
+.app-container.compact-mode .item-preview,
+.app-container.compact-mode .item-author {
+  display: none !important;
+}
+
+.app-container.compact-mode .subject-pill {
+  padding: 4px 8px;
+  font-size: 8px;
+}
+.app-container.compact-mode .fab {
+  width: 32px;
+  height: 32px;
+  bottom: 8px;
+  right: 8px;
+  position: absolute;
+}
+
+/* Unified Settings Preset Picker */
+.settings-segment-container {
+  position: relative;
+  display: flex;
+  background: var(--md-sys-color-surface-container);
+  border-radius: var(--md-sys-shape-corner-medium);
+  padding: 4px;
+}
+.settings-gliding-pill {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: calc(33.333% - 2.66px); /* Roughly 1/3 minus margins */
+  background: var(--md-sys-color-primary-container);
+  border-radius: var(--md-sys-shape-corner-medium);
+  transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+  z-index: 0;
+}
+.settings-segment-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+  color: var(--md-sys-color-secondary);
+  transition: color 0.2s;
+  padding: 6px 12px;
+  border-radius: var(--md-sys-shape-corner-medium);
+  font: var(--md-sys-typescale-label-small);
+  font-weight: 600;
+}
+.settings-segment-btn.active {
+  color: #000000;
+}
+
+/* Toggle Switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+}
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: var(--md-sys-color-surface-container);
+  transition: .3s;
+  border-radius: 22px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+}
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  bottom: 2px;
+  background-color: var(--md-sys-color-secondary);
+  transition: .3s;
+  border-radius: 50%;
+}
+input:checked + .toggle-slider {
+  background-color: var(--md-sys-color-primary-container);
+  border-color: var(--md-sys-color-primary-container);
+}
+input:checked + .toggle-slider:before {
+  transform: translateX(18px);
+  background-color: #000000;
+}
+
+/* Linux uses logical desktop pixels and readable text at every widget size. */
+html[data-platform="linux"] body {
+  font-family: "Noto Sans", "DejaVu Sans", sans-serif;
+}
+
+.app-container.linux-widget {
+  --text-scale: 1;
+  --md-sys-typescale-font: "Noto Sans", "DejaVu Sans", sans-serif;
+  --widget-metadata-size: calc(12px * var(--text-scale));
+  --calendar-day-size: calc(28px * var(--text-scale));
+  --md-sys-typescale-title-large: 600 calc(20px * var(--text-scale))/1.3 var(--md-sys-typescale-font);
+  --md-sys-typescale-title-medium: 600 calc(18px * var(--text-scale))/1.3 var(--md-sys-typescale-font);
+  --md-sys-typescale-title-small: 600 calc(16px * var(--text-scale))/1.35 var(--md-sys-typescale-font);
+  --md-sys-typescale-body-large: 400 calc(16px * var(--text-scale))/1.45 var(--md-sys-typescale-font);
+  --md-sys-typescale-body-medium: 400 calc(14px * var(--text-scale))/1.45 var(--md-sys-typescale-font);
+  --md-sys-typescale-body-small: 400 calc(14px * var(--text-scale))/1.4 var(--md-sys-typescale-font);
+  --md-sys-typescale-label-large: 500 calc(14px * var(--text-scale))/1.4 var(--md-sys-typescale-font);
+  --md-sys-typescale-label-medium: 500 calc(13px * var(--text-scale))/1.4 var(--md-sys-typescale-font);
+  --md-sys-typescale-label-small: 500 var(--widget-metadata-size)/1.4 var(--md-sys-typescale-font);
+  border-radius: 24px;
+  font: var(--md-sys-typescale-body-medium);
+}
+
+.linux-widget *, .linux-widget *::before, .linux-widget *::after {
+  box-sizing: border-box;
+}
+
+.linux-widget .compact-top-bar { flex-shrink: 0; }
+.linux-widget .content-area { min-height: 0; overflow-x: hidden; }
+.linux-widget .content-area > * { flex-shrink: 0; min-width: 0; max-width: 100%; }
+.linux-widget .content-col { min-width: 0; }
+.linux-widget .item-course { min-width: 0; }
+.linux-widget .item-time-wrapper, .linux-widget .item-time-text { flex-shrink: 0; }
+.linux-widget .zoom-item-header { min-width: 0; gap: 8px; }
+.linux-widget .zoom-item-course { min-width: 0; overflow-wrap: anywhere; }
+.linux-widget .item-title, .linux-widget .item-preview { overflow-wrap: anywhere; }
+.linux-widget .subject-pill { font-size: var(--widget-metadata-size); }
+.linux-widget .time-col { min-width: 44px; }
+.linux-widget .settings-segment-btn { padding: 8px 4px; }
+.linux-widget .schedule-settings { height: auto !important; min-height: 100%; }
+.linux-widget .schedule-settings > div { flex-shrink: 0; }
+.linux-widget .schedule-settings > div > div { flex-wrap: wrap; gap: 8px; }
+.linux-widget .text-size-setting { display: flex; flex-direction: column; gap: 8px; }
+.linux-widget select {
+  width: 100%;
+  padding: 8px;
+  font: var(--md-sys-typescale-body-medium);
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 8px;
+  color-scheme: dark;
+}
+.linux-widget input, .linux-widget textarea { min-width: 0; max-width: 100%; }
+.linux-widget button { flex-shrink: 0; }
+.linux-widget .calendar-grid-view { height: auto !important; min-height: 100%; }
+.linux-widget .calendar-grid-view > div:last-child { flex-wrap: wrap; }
+.linux-widget .ai-chat {
+  min-height: 0;
+  flex: 1 0 240px;
+  overflow-y: auto !important;
+  padding: 8px !important;
+}
+.linux-widget .ai-chat > div:has(form) { min-height: 200px; }
+.linux-widget .ai-chat > div:has(form) > div { min-height: 0; }
+.linux-widget .ai-chat form { flex-shrink: 0; }
+.linux-widget .ai-chat form input { width: 0; }
+
+@media (max-width: 310px) {
+  .linux-widget {
+    --tab-btn-size: 26px;
+    --tab-btn-gap: 4px;
+    --tab-padding-x: 8px;
+  }
+  .linux-widget .content-area { padding-inline: 8px; }
+}
+
+/* Login scales with the selected widget size and the independent text setting. */
+.app-container { --auth-scale: 1; }
+.app-container[data-size="Small"] { --auth-scale: 0.85; }
+.app-container[data-size="Large"] { --auth-scale: 1.25; }
+
+.auth-modal {
+  --auth-title-size: 14px;
+  --auth-label-size: 12px;
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  padding: calc(48px * var(--auth-scale)) calc(12px * var(--auth-scale));
+  box-sizing: border-box;
+  overflow: hidden;
+  text-align: center;
+  background: var(--md-sys-color-background);
+  border-radius: inherit;
+}
+
+.linux-widget .auth-modal {
+  --auth-title-size: 16px;
+  --auth-label-size: 13px;
+}
+
+.auth-modal .auth-close {
+  position: absolute;
+  top: calc(12px * var(--auth-scale));
+  right: calc(12px * var(--auth-scale));
+  width: calc(24px * var(--auth-scale));
+  height: calc(24px * var(--auth-scale));
+}
+
+.auth-close svg {
+  width: calc(14px * var(--auth-scale));
+  height: calc(14px * var(--auth-scale));
+}
+
+.auth-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(4px * var(--auth-scale));
+  width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.auth-content > * { flex-shrink: 0; }
+
+.auth-logo {
+  width: calc(32px * var(--auth-scale));
+  height: calc(32px * var(--auth-scale));
+  color: var(--md-sys-color-primary);
+}
+
+.auth-title {
+  margin: 0;
+  font: 600 calc(var(--auth-title-size) * var(--auth-scale) * var(--text-scale, 1))/1.35 var(--md-sys-typescale-font);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(8px * var(--auth-scale));
+  width: 100%;
+  margin-top: calc(16px * var(--auth-scale));
+}
+
+.auth-url, .auth-login {
+  box-sizing: border-box;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: 500 calc(var(--auth-label-size) * var(--auth-scale) * var(--text-scale, 1))/1.4 var(--md-sys-typescale-font);
+}
+
+.auth-url {
+  width: calc(100% * 2 / 3);
+  min-width: 0;
+  padding: calc(10px * var(--auth-scale));
+  border: 2px solid transparent;
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+  text-align: center;
+  transition: border-color 0.2s;
+}
+
+.auth-url[aria-invalid="true"] { border-color: var(--md-sys-color-error); }
+
+.auth-login {
+  /* Original button was 72% of the form; keep 40% of that width. */
+  width: 28.8%;
+  padding: calc(8px * var(--auth-scale)) calc(4px * var(--auth-scale));
+  border: none;
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-login:disabled { cursor: default; opacity: 0.7; }
+
+.auth-url:focus-visible, .auth-login:focus-visible, .auth-close:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+
+.auth-error, .auth-success {
+  max-width: 100%;
+  font: 500 calc(var(--auth-label-size) * var(--auth-scale) * var(--text-scale, 1))/1.4 var(--md-sys-typescale-font);
+  overflow-wrap: anywhere;
+}
+
+.auth-error { color: var(--md-sys-color-error); }
+.auth-success { margin-top: calc(16px * var(--auth-scale)); color: var(--md-sys-color-primary); }

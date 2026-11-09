@@ -1,0 +1,100 @@
+diff --git a/electron/main.js b/electron/main.js
+index 9375842..cf34909 100644
+--- a/electron/main.js
++++ b/electron/main.js
+@@ -521,7 +521,7 @@ function createWindow() {
+   });
+ }
+ 
+-function registerIpcAndSessionHandlers() {
++export function registerIpcAndSessionHandlers() {
+   // Listen to cookie updates to automatically write them to disk
+   session.defaultSession.cookies.on('changed', (event, cookie, cause, removed) => {
+     if (cookie.name === 'canvas_session' && !removed) {
+@@ -540,7 +540,10 @@ function registerIpcAndSessionHandlers() {
+ 
+   // ── IPC Handlers ────────────────────────────────────────────────────────────
+ 
+-  ipcMain.on('close-app', () => app.quit());
++  ipcMain.on('close-app', (event) => {
++    if (process.env.COMMAND_CENTER_HOST) event.sender.send('sidekick-close-request');
++    else app.quit();
++  });
+   ipcMain.on('minimize-app', () => {
+     if (mainWindow) mainWindow.minimize();
+   });
+@@ -741,9 +744,9 @@ function registerIpcAndSessionHandlers() {
+ 
+   // Renderer calls this once after auth — Main takes over all future polling
+   ipcMain.on('start-canvas-polling', (_event, schoolUrl, trackedTasks) => {
+-    if (!mainWindow) return;
++    if (_event.sender.isDestroyed()) return;
+     console.log(`[poll] Starting main-process polling for ${schoolUrl}`);
+-    startPolling(schoolUrl, mainWindow.webContents, trackedTasks);
++    startPolling(schoolUrl, _event.sender, trackedTasks);
+   });
+ 
+   // ─── LLM IPC Handlers ───────────────────────────────────────────────────────
+@@ -956,7 +959,9 @@ if (process.platform === 'linux' && process.env.CANVAS_SIDEKICK_NATIVE_WAYLAND !
+   app.commandLine.appendSwitch('ozone-platform', 'x11');
+ }
+ 
+-app.whenReady().then(() => {
++if (!process.env.COMMAND_CENTER_HOST) {
++if (!app.requestSingleInstanceLock()) app.quit();
++else app.whenReady().then(() => {
+   registerIpcAndSessionHandlers();
+   registerPowerMonitorHandlers();
+   setupAutoLaunch();
+@@ -971,3 +976,5 @@ app.on('window-all-closed', () => {
+ app.on('activate', () => {
+   if (BrowserWindow.getAllWindows().length === 0) createWindow();
+ });
++
++}
+diff --git a/electron/preload.js b/electron/preload.js
+index 2be0019..3bc3ca6 100644
+--- a/electron/preload.js
++++ b/electron/preload.js
+@@ -1,6 +1,12 @@
+ const { contextBridge, ipcRenderer } = require('electron');
+ 
+ contextBridge.exposeInMainWorld('api', {
++  publishCommandCenterCanvasTasks: (tasks) => ipcRenderer.send('command-center-canvas-tasks', tasks),
++  onCommandCenterTaskToggle: (callback) => {
++    const listener = (_event, id) => callback(id);
++    ipcRenderer.on('command-center-toggle-canvas-task', listener);
++    return () => ipcRenderer.removeListener('command-center-toggle-canvas-task', listener);
++  },
+   platform: process.platform,
+   closeApp:    () => ipcRenderer.send('close-app'),
+   minimizeApp: () => ipcRenderer.send('minimize-app'),
+diff --git a/src/App.jsx b/src/App.jsx
+index 7ce3ee6..a8894f5 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -335,6 +335,24 @@ export default function App() {
+     });
+   }, []);
+ 
++  // Keep the host task calendar in sync without mixing Canvas data into Sidekick's personal task cache.
++  useEffect(() => {
++    if (!isAuthenticated || !window.api?.publishCommandCenterCanvasTasks) return;
++    const deadlines = items.filter(item => item.type === 'deadline').map(item => ({
++      id: String(item.id), title: String(item.title || 'Untitled assignment'),
++      course: String(item.course || ''), dueDate: item.dueDate || '',
++      completed: Boolean(item.completed), schoolUrl: String(item.schoolUrl || schoolUrl || '')
++    }));
++    window.api.publishCommandCenterCanvasTasks(deadlines);
++  }, [items, isAuthenticated, schoolUrl]);
++
++  useEffect(() => {
++    if (!window.api?.onCommandCenterTaskToggle) return;
++    return window.api.onCommandCenterTaskToggle(id => {
++      if (typeof id === 'string') toggleItemComplete(id);
++    });
++  }, [toggleItemComplete]);
++
+   // ── Delete custom task ──────────────────────────────────────────────────────
+   const deleteCustomTask = useCallback((id) => {
+     setItems(prevItems => prevItems.filter(item => item.id !== id));
