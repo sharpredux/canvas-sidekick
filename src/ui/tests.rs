@@ -129,8 +129,13 @@ fn setup(custom: bool) -> (tempfile::TempDir, egui::Context, App) {
     };
     (temporary, ctx, app)
 }
-fn draw(ctx: &egui::Context, app: &mut App, time: f64, events: Vec<egui::Event>) {
-    let _ = ctx.run(
+fn draw(
+    ctx: &egui::Context,
+    app: &mut App,
+    time: f64,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    ctx.run(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -146,7 +151,7 @@ fn draw(ctx: &egui::Context, app: &mut App, time: f64, events: Vec<egui::Event>)
                 app.card(ui, &item);
             });
         },
-    );
+    )
 }
 fn pointer(x: f32, y: f32, down: bool) -> Vec<egui::Event> {
     let pos = egui::pos2(x, y);
@@ -159,6 +164,43 @@ fn pointer(x: f32, y: f32, down: bool) -> Vec<egui::Event> {
             modifiers: egui::Modifiers::NONE,
         },
     ]
+}
+#[test]
+fn task_hover_tints_the_existing_fill_without_adding_an_outline() {
+    let point = egui::pos2(100., 45.);
+    for hosted in [false, true] {
+        let (_temp, ctx, mut app) = setup(false);
+        app.hosted = hosted;
+        let idle = draw(&ctx, &mut app, 0., vec![]);
+        let card = idle
+            .shapes
+            .iter()
+            .find_map(|entry| match &entry.shape {
+                egui::Shape::Rect(rect) if rect.fill == app.palette().card => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        for frame in 1..12 {
+            draw(
+                &ctx,
+                &mut app,
+                f64::from(frame) / 30.,
+                vec![egui::Event::PointerMoved(point)],
+            );
+        }
+        let output = draw(&ctx, &mut app, 0.4, vec![]);
+        let mut surfaces = output.shapes.iter().filter_map(|entry| match &entry.shape {
+            egui::Shape::Rect(rect) if rect.rect == card.rect => Some(rect),
+            _ => None,
+        });
+        let hovered = surfaces.next().unwrap();
+        assert!(surfaces.next().is_none());
+        assert_eq!(hovered.stroke, egui::Stroke::NONE);
+        assert_eq!(hovered.corner_radius, card.corner_radius);
+        let difference = hovered.fill.r().abs_diff(card.fill.r());
+        assert!((5..=15).contains(&difference));
+        assert_eq!(hovered.fill.r() > card.fill.r(), !hosted);
+    }
 }
 #[test]
 fn datetime_popup_selects_a_day_hour_minute_period_and_clears() {

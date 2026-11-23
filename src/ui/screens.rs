@@ -394,7 +394,11 @@ impl App {
         ui.set_clip_rect(clip);
         ui.advance_cursor_after_rect(rect);
     }
-    fn card_foreground(&self, ui: &mut egui::Ui, item: &Item) -> (egui::Rect, Option<egui::Rect>) {
+    fn card_foreground(
+        &self,
+        ui: &mut egui::Ui,
+        item: &Item,
+    ) -> (egui::epaint::RectShape, egui::layers::ShapeIdx, Option<egui::Rect>) {
         let p = self.palette();
         let linux = cfg!(target_os = "linux");
         let compact = self.settings.size == "Small";
@@ -619,11 +623,13 @@ impl App {
             height = y + py;
         }
         let rect = egui::Rect::from_min_size(start, egui::vec2(width, height));
-        ui.painter().rect_filled(
+        let background = egui::epaint::RectShape::filled(
             rect,
             radius,
             if item.completed { p.success } else { p.card },
         );
+        // Reserve the layer behind text while the caller checks hover on the finished card.
+        let background_index = ui.painter().add(egui::Shape::Noop);
         if let Some((center, color)) = estimate_icon {
             ui.painter()
                 .circle_stroke(center, 1.75, egui::Stroke::new(0.75_f32, color));
@@ -640,7 +646,7 @@ impl App {
         for (position, galley, color) in blocks {
             ui.painter().galley(position, galley, color);
         }
-        (rect, zoom)
+        (background, background_index, zoom)
     }
     pub(super) fn auth(&mut self, ui: &mut egui::Ui) {
         let p = self.palette();
@@ -932,7 +938,8 @@ impl App {
             card_ui.set_opacity(1. - progress);
             card_ui.disable();
         }
-        let (frame_rect, zoom_rect) = self.card_foreground(&mut card_ui, item);
+        let (mut background, background_index, zoom_rect) = self.card_foreground(&mut card_ui, item);
+        let frame_rect = background.rect;
 
         state.height = frame_rect.height();
         let height = if item.is_custom {
@@ -955,6 +962,13 @@ impl App {
                 egui::Sense::click()
             },
         );
+        let hover = ui.ctx().animate_bool_with_time(
+            egui::Id::new(("card-hover", &item.id)),
+            response.hovered(),
+            0.16,
+        );
+        background.fill = background.fill.lerp_to_gamma(Color32::GRAY, hover * 0.10);
+        card_ui.painter().set(background_index, background);
         let open_zoom = zoom_rect.is_some_and(|rect| {
             let rect = if item.is_custom {
                 rect.intersect(wrapper_clip)
