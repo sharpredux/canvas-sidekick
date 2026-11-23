@@ -134,6 +134,48 @@ pub fn fit(xid: u32, size: [f32; 2], scale: f32, initial: bool) -> anyhow::Resul
 }
 
 #[cfg(target_os = "linux")]
+pub fn hide_from_taskbar(xid: u32, before_map: bool) -> anyhow::Result<bool> {
+    use x11rb::{protocol::xproto::*, wrapper::ConnectionExt as _};
+
+    let (conn, _) = x11rb::connect(None)?;
+    let atom = |name: &[u8]| -> anyhow::Result<u32> {
+        Ok(conn.intern_atom(false, name)?.reply()?.atom)
+    };
+    let state = atom(b"_NET_WM_STATE")?;
+    let hints = [
+        atom(b"_NET_WM_STATE_SKIP_TASKBAR")?,
+        atom(b"_NET_WM_STATE_SKIP_PAGER")?,
+    ];
+    let property = conn.get_property(false, xid, state, AtomEnum::ATOM, 0, u32::MAX)?.reply()?;
+    let mut present: Vec<_> = property.value32().into_iter().flatten().collect();
+    let missing: Vec<_> = hints.into_iter().filter(|atom| !present.contains(atom)).collect();
+    if before_map {
+        present.extend(missing);
+        conn.change_property32(PropMode::REPLACE, xid, state, AtomEnum::ATOM, &present)?.check()?;
+    } else {
+        if conn.get_window_attributes(xid)?.reply()?.map_state != MapState::VIEWABLE {
+            return Ok(false);
+        }
+        if let Some(&first) = missing.first() {
+            let root = conn.get_geometry(xid)?.reply()?.root;
+            let event = ClientMessageEvent::new(
+                32,
+                xid,
+                state,
+                ClientMessageData::from([1, first, missing.get(1).copied().unwrap_or(0), 1, 0]),
+            );
+            conn.send_event(
+                false,
+                root,
+                EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+                event,
+            )?.check()?;
+        }
+    }
+    Ok(true)
+}
+
+#[cfg(target_os = "linux")]
 pub fn shape(xid: u32, scale: f32, parent: Option<u32>, attach: bool) -> anyhow::Result<()> {
     use x11rb::{
         connection::Connection,
@@ -152,24 +194,21 @@ pub fn shape(xid: u32, scale: f32, parent: Option<u32>, attach: bool) -> anyhow:
             conn.reparent_window(xid, parent, 0, 0)?.check()?;
         }
     } else if attach {
-        for names in [
-            ["_NET_WM_STATE_BELOW", "_NET_WM_STATE_STICKY"],
-            ["_NET_WM_STATE_SKIP_TASKBAR", "_NET_WM_STATE_SKIP_PAGER"],
-        ] {
-            let event = ClientMessageEvent::new(
-                32,
-                xid,
-                atom("_NET_WM_STATE")?,
-                ClientMessageData::from([1, atom(names[0])?, atom(names[1])?, 1, 0]),
-            );
-            conn.send_event(
-                false,
-                root,
-                EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
-                event,
-            )?
-            .check()?;
-        }
+        let event = ClientMessageEvent::new(
+            32,
+            xid,
+            atom("_NET_WM_STATE")?,
+            ClientMessageData::from([
+                1, atom("_NET_WM_STATE_BELOW")?, atom("_NET_WM_STATE_STICKY")?, 1, 0,
+            ]),
+        );
+        conn.send_event(
+            false,
+            root,
+            EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+            event,
+        )?
+        .check()?;
     }
     let geometry = conn.get_geometry(xid)?.reply()?;
     let width = geometry.width;

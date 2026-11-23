@@ -233,6 +233,37 @@ fn gradient_pill(ui: &egui::Ui, rect: egui::Rect) {
     ui.ctx().request_repaint();
 }
 impl App {
+    pub(super) fn canvas_status(&mut self, ui: &mut egui::Ui) {
+        let p = self.palette();
+        if self.credential_read_failed {
+            ui.horizontal_wrapped(|ui| {
+                ui.colored_label(p.muted, "Canvas session unavailable");
+                if ui.small_button("Retry").clicked() {
+                    self.boot();
+                }
+            });
+        } else if self.reconnect_required {
+            ui.horizontal_wrapped(|ui| {
+                ui.colored_label(p.muted, "Showing saved tasks");
+                let signing_in = self.auth_waiting || self.auth_success.is_some();
+                let label = if signing_in { "Signing in…" } else { "Reconnect Canvas" };
+                if ui.add_enabled(!signing_in, egui::Button::new(label).small()).clicked() {
+                    self.login();
+                }
+            });
+            if let Some(error) = &self.error {
+                ui.colored_label(p.error, error);
+            }
+        } else if self.session_unsaved {
+            ui.horizontal_wrapped(|ui| {
+                ui.colored_label(p.muted, "Canvas session could not be saved");
+                if ui.add_enabled(!self.fetching, egui::Button::new("Retry").small()).clicked() {
+                    self.fetch(false);
+                }
+            });
+        }
+    }
+
     pub(super) fn header(&mut self, ui: &mut egui::Ui) {
         let p = self.palette();
         let compact = self.settings.size == "Small" || ui.ctx().content_rect().width() <= 310.;
@@ -1540,6 +1571,8 @@ impl App {
             )
             .clicked()
             && !syncing
+            && self.session.is_some()
+            && !self.reconnect_required
         {
             self.manual_sync = true;
             self.fetch(false);

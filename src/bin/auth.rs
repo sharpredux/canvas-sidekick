@@ -1,6 +1,7 @@
 //! Isolated system-webview login. Session output travels only over a private pipe.
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 use anyhow::{Result, bail};
+use canvas_sidekick_rust::canvas::Canvas;
 use serde_json::{Value, json};
 use std::{
     io::{self, BufRead, IsTerminal},
@@ -13,57 +14,10 @@ use tao::{
     window::WindowBuilder,
 };
 use wry::WebViewBuilder;
-struct Verification {
-    cookies: Option<Vec<Value>>,
-    status: Option<u16>,
-    error: Option<String>,
-}
-async fn verify(
-    endpoint: String,
-    header: String,
-    agent: String,
-    cookies: Vec<Value>,
-) -> Verification {
-    let result = async {
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(15))
-            .user_agent(agent)
-            .build()?;
-        client
-            .get(endpoint)
-            .header("Accept", "application/json")
-            .header("Cookie", header)
-            .send()
-            .await
-    }
-    .await;
-    match result {
-        Ok(response) => {
-            let status = response.status().as_u16();
-            let accepted = response.status().is_success()
-                && response
-                    .headers()
-                    .get("content-type")
-                    .and_then(|v| v.to_str().ok())
-                    .is_some_and(|v| v.contains("application/json"));
-            let accepted = accepted
-                && response.json::<Value>().await.ok().is_some_and(|profile| {
-                    profile["id"].as_u64().is_some()
-                        || profile["id"].as_str().is_some_and(|s| !s.is_empty())
-                });
-            Verification {
-                cookies: accepted.then_some(cookies),
-                status: Some(status),
-                error: None,
-            }
-        }
-        Err(error) => Verification {
-            cookies: None,
-            status: None,
-            error: Some(error.to_string()),
-        },
-    }
+async fn verify(session: Value) -> Result<Value> {
+    let canvas = Canvas::restore_session(&session)?;
+    canvas.verify_profile(session["userAgent"].as_str()).await?;
+    canvas.session_snapshot(&session)
 }
 fn diagnostic(enabled: bool, value: Value) {
     if enabled {
@@ -84,7 +38,7 @@ fn main() -> Result<()> {
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("missing URL"))?
         .to_owned();
-    let origin = canvas_sidekick_rust::canvas::Canvas::new(&login_url)?.origin;
+    let origin = Canvas::new(&login_url)?.origin;
     let endpoint = format!("{origin}/api/v1/users/self/profile");
     let diagnostics = config["diagnostics"].as_bool().unwrap_or(false);
     let event_loop = EventLoop::new();
@@ -93,7 +47,7 @@ fn main() -> Result<()> {
         .with_inner_size(tao::dpi::LogicalSize::new(800., 600.))
         .build(&event_loop)?;
     let (nav_tx, nav_rx) = mpsc::channel();
-    let (verify_tx, verify_rx) = mpsc::channel::<Verification>();
+    let (verify_tx, verify_rx) = mpsc::channel::<Result<Value>>();
     let (agent_tx, agent_rx) = mpsc::channel::<String>();
     let builder = WebViewBuilder::new()
         .with_url(&login_url)
@@ -151,12 +105,14 @@ fn main() -> Result<()> {
         }
         if let Ok(result)=verify_rx.try_recv(){
             checking=false;
-            diagnostic(diagnostics,json!({"probeStatus":result.status,"error":result.error}));
-            if let Some(cookies)=result.cookies{
-                finished=true;
-                println!("{}",json!({"type":"authenticated","origin":origin,"cookies":cookies,"userAgent":agent}));
-                *flow=ControlFlow::Exit;
-                return;
+            match result {
+                Ok(session) => {
+                    finished = true;
+                    println!("{session}");
+                    *flow = ControlFlow::Exit;
+                    return;
+                }
+                Err(_) => diagnostic(diagnostics, json!({"profileVerified":false})),
             }
         }
         if let Ok(value)=agent_rx.try_recv(){agent=value;}
@@ -176,13 +132,17 @@ fn main() -> Result<()> {
                     if cookies.is_empty(){return;}
                     checking=true;
                     let serialized:Vec<Value>=cookies.iter().map(|c|json!({"name":c.name(),"value":c.value(),"domain":c.domain(),"path":c.path(),"secure":c.secure(),"httpOnly":c.http_only(),"sameSite":c.same_site().map(|s|s.to_string()),"expirationDate":c.expires_datetime().map(|t|t.unix_timestamp())})).collect();
-                    let header=cookies.iter().map(|c|format!("{}={}",c.name(),c.value())).collect::<Vec<_>>().join("; ");
-                    let tx=verify_tx.clone();let endpoint=endpoint.clone();let agent=agent.clone();
-                    std::thread::spawn(move ||{
-                        let result=match tokio::runtime::Runtime::new(){
-                            Ok(rt)=>rt.block_on(verify(endpoint,header,agent,serialized)),
-                            Err(error)=>Verification{cookies:None,status:None,error:Some(error.to_string())},
-                        };
+                    let session = json!({
+                        "type": "authenticated",
+                        "origin": origin,
+                        "cookies": serialized,
+                        "userAgent": agent,
+                    });
+                    let tx = verify_tx.clone();
+                    std::thread::spawn(move || {
+                        let result = tokio::runtime::Runtime::new()
+                            .map_err(anyhow::Error::from)
+                            .and_then(|rt| rt.block_on(verify(session)));
                         let _=tx.send(result);
                     });
                 }

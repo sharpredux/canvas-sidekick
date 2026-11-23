@@ -1,5 +1,5 @@
 use canvas_sidekick_rust::{
-    canvas::Canvas,
+    canvas::{Canvas, SessionSync},
     completion::{self, Override},
     credentials::Credentials,
     model::{Item, Settings},
@@ -55,7 +55,7 @@ struct BootData {
     settings: Settings,
     state: State,
     schedule: String,
-    session: Option<Value>,
+    session: Result<Option<Value>, String>,
 }
 fn load_boot(profile: &Profile) -> anyhow::Result<BootData> {
     if canvas_sidekick_rust::migration::needs_import(profile) {
@@ -71,7 +71,7 @@ fn load_boot(profile: &Profile) -> anyhow::Result<BootData> {
     }
     let schedule =
         std::fs::read_to_string(profile.data_dir().join("schedule.txt")).unwrap_or_default();
-    let session = Credentials::new(&profile.root).load()?;
+    let session = Credentials::new(&profile.root).load().map_err(|e| e.to_string());
     Ok(BootData {
         settings,
         state,
@@ -82,10 +82,8 @@ fn load_boot(profile: &Profile) -> anyhow::Result<BootData> {
 enum Event {
     Boot(Result<BootData, String>),
     PollDue,
-    Auth(Result<Value, String>),
-    Fetched(Result<Vec<Item>, String>, bool),
-    CredentialError(String),
-    SessionUpdated(Value),
+    Auth(Result<(Value, bool), String>),
+    Fetched(Result<SessionSync, String>, bool, bool),
     StartupStatus(bool),
     Estimate(String, Result<Value, String>),
     OllamaCheck(u64, bool, bool),
@@ -141,8 +139,10 @@ pub struct App {
     rt: tokio::runtime::Runtime,
     tx: EventSender,
     rx: mpsc::Receiver<Event>,
-    canvas: Option<Canvas>,
     session: Option<Value>,
+    session_unsaved: bool,
+    reconnect_required: bool,
+    credential_read_failed: bool,
     authenticated: bool,
     checking: bool,
     migration_required: bool,
@@ -160,6 +160,8 @@ pub struct App {
     poll_task: Option<tokio::task::JoinHandle<()>>,
     last_shape: Instant,
     attached: bool,
+    #[cfg(target_os = "linux")]
+    taskbar_checked: bool,
     resize_pending: bool,
     parent: Option<u64>,
     hosted: bool,
@@ -271,47 +273,33 @@ impl App {
         }));
     }
     fn fetch(&mut self, archive: bool) {
-        if self.fetching {
+        if self.fetching || self.auth_waiting || self.auth_success.is_some() || self.reconnect_required {
             return;
         }
-        let Some(canvas) = self.canvas.clone() else {
+        let Some(session) = self.session.clone() else {
             return;
         };
         self.fetching = true;
-        self.loading = !archive;
+        self.loading = !archive && self.state.items.is_empty();
         let items = self.state.items.clone();
-        let session = self.session.clone();
+        let was_unsaved = self.session_unsaved;
         let store = Credentials::new(&self.profile.root);
         let tx = self.tx.clone();
         self.rt.spawn(async move {
-            let result = canvas.fetch(&items).await.map_err(|e| e.to_string());
-            let snapshot = if result.is_ok() {
-                session.and_then(|previous| {
-                    canvas
-                        .session_snapshot(&previous)
-                        .ok()
-                        .filter(|next| *next != previous)
-                })
-            } else {
-                None
-            };
-            let _ = tx.send(Event::Fetched(result, archive));
-            if let Some(snapshot) = snapshot {
-                let saved = snapshot.clone();
-                match tokio::task::spawn_blocking(move || store.save(&saved)).await {
-                    Ok(Ok(())) => {
-                        let _ = tx.send(Event::SessionUpdated(snapshot));
-                    }
-                    Ok(Err(error)) => {
-                        let _ = tx.send(Event::CredentialError(error.to_string()));
-                    }
-                    Err(_) => {
-                        let _ = tx.send(Event::CredentialError(
-                            "Canvas session persistence was interrupted.".into(),
-                        ));
-                    }
+            let result = Canvas::sync_session(&session, &items)
+                .await
+                .map_err(|e| e.to_string());
+            let mut unsaved = was_unsaved;
+            if let Ok(sync) = &result {
+                if !sync.expired && (sync.session.is_some() || was_unsaved) {
+                    let latest = sync.session.clone().unwrap_or(session);
+                    unsaved = !matches!(
+                        tokio::task::spawn_blocking(move || store.save(&latest)).await,
+                        Ok(Ok(()))
+                    );
                 }
             }
+            let _ = tx.send(Event::Fetched(result, archive, unsaved));
         });
     }
     fn publish(&self) {
@@ -396,7 +384,7 @@ impl App {
         });
     }
     fn login(&mut self) {
-        if self.auth_waiting || self.auth_url.trim().is_empty() {
+        if self.fetching || self.auth_waiting || self.auth_success.is_some() || self.auth_url.trim().is_empty() {
             return;
         }
         self.error = None;
@@ -408,7 +396,7 @@ impl App {
         let tx = self.tx.clone();
         let store = Credentials::new(&self.profile.root);
         self.rt.spawn_blocking(move || {
-            let result = (|| -> anyhow::Result<Value> {
+            let result = (|| -> anyhow::Result<(Value, bool)> {
                 Canvas::new(&url).map_err(|_| anyhow::anyhow!("Enter a valid Canvas URL."))?;
                 let helper = std::env::current_exe()?.with_file_name(if cfg!(windows) {
                     "canvas-sidekick-auth.exe"
@@ -442,8 +430,8 @@ impl App {
                         }
                     );
                 }
-                store.save(&event)?;
-                Ok(event)
+                let unsaved = store.save(&event).is_err();
+                Ok((event, unsaved))
             })();
             let _ = tx.send(Event::Auth(result.map_err(|e| e.to_string())));
         });
@@ -453,8 +441,9 @@ impl App {
             Ok(canvas) => {
                 self.settings.school_url = canvas.origin.clone();
                 self.auth_url = canvas.origin.clone();
-                self.canvas = Some(canvas);
                 self.session = Some(session);
+                self.reconnect_required = false;
+                self.credential_read_failed = false;
                 self.last_data = None;
                 self.authenticated = true;
                 self.save_settings();
@@ -462,15 +451,16 @@ impl App {
                 self.start_polling();
                 self.fetch(false);
             }
-            Err(error) => self.error = Some(error.to_string()),
+            Err(error) => {
+                self.credential_read_failed = true;
+                self.error = Some(error.to_string());
+            }
         }
     }
     fn events(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             match event {
                 Event::StartupStatus(enabled) => self.startup_enabled = enabled,
-                Event::SessionUpdated(session) => self.session = Some(session),
-                Event::CredentialError(error) => self.error = Some(error),
                 Event::PollDue => {
                     if self.authenticated {
                         self.fetch(true);
@@ -496,9 +486,11 @@ impl App {
                                     self.resize_pending = true;
                                 }
                             }
-                            if let Some(session) = data.session {
-                                self.checking = true;
-                                self.accept_session(session);
+                            self.authenticated = !self.auth_url.is_empty();
+                            match data.session {
+                                Ok(Some(session)) => self.accept_session(session),
+                                Ok(None) => self.reconnect_required = self.authenticated && !self.auth_url.is_empty(),
+                                Err(_) => self.credential_read_failed = true,
                             }
                         }
                         Err(error) => self.error = Some(error),
@@ -507,7 +499,8 @@ impl App {
                 Event::Auth(result) => {
                     self.auth_waiting = false;
                     match result {
-                        Ok(session) => {
+                        Ok((session, unsaved)) => {
+                            self.session_unsaved = unsaved;
                             self.error = None;
                             self.auth_success =
                                 Some((session, Instant::now() + Duration::from_millis(500)));
@@ -515,16 +508,30 @@ impl App {
                         Err(e) => self.error = Some(e),
                     }
                 }
-                Event::Fetched(result, archive) => {
+                Event::Fetched(result, archive, unsaved) => {
                     self.checking = false;
                     self.loading = false;
                     self.fetching = false;
+                    self.session_unsaved = unsaved;
                     if self.manual_sync {
                         self.manual_sync = false;
                         self.sync_feedback_until =
                             Some(Instant::now() + Duration::from_millis(800));
                     }
 
+                    let result = result.and_then(|sync| {
+                        if let Some(session) = sync.session {
+                            self.session = Some(session);
+                        }
+                        if sync.expired {
+                            self.reconnect_required = true;
+                            self.error = None;
+                            if let Some(task) = self.poll_task.take() {
+                                task.abort();
+                            }
+                        }
+                        sync.items.map_err(|e| e.to_string())
+                    });
                     match result {
                         Ok(items) => {
                             self.last_fetch = Some(Utc::now());
@@ -547,20 +554,8 @@ impl App {
                                 self.estimate_missing();
                             }
                         }
-                        Err(e) => {
-                            if e.contains("unauthorized") {
-                                self.authenticated = false;
-                                if let Some(task) = self.poll_task.take() {
-                                    task.abort();
-                                }
-                                self.canvas = None;
-                                let store = Credentials::new(&self.profile.root);
-                                self.rt.spawn_blocking(move || {
-                                    let _ = store.clear();
-                                });
-                            }
-                            self.error = Some(e);
-                        }
+                        Err(e) if !self.reconnect_required => self.error = Some(e),
+                        Err(_) => {}
                     }
                 }
                 Event::Estimate(id, result) => match result {
@@ -1032,6 +1027,21 @@ impl eframe::App for App {
                     );
                 }
                 #[cfg(debug_assertions)]
+                Some("test-canvas-state") => {
+                    println!(
+                        "{}",
+                        json!({
+                            "type":"test-canvas-state",
+                            "ready": !self.checking && !self.fetching && !self.auth_waiting && self.auth_success.is_none(),
+                            "tasksVisible": self.authenticated || self.credential_read_failed,
+                            "reconnect": self.reconnect_required,
+                            "keyringUnavailable": self.credential_read_failed,
+                            "unsaved": self.session_unsaved,
+                            "itemCount": self.state.items.len(),
+                        })
+                    );
+                }
+                #[cfg(debug_assertions)]
                 Some("test-login") => {
                     if let Some(url) = command["url"].as_str() {
                         self.auth_url = url.into();
@@ -1120,6 +1130,16 @@ impl eframe::App for App {
                     _ => None,
                 };
                 if let Some(xid) = xid {
+                    #[cfg(target_os = "linux")]
+                    if self.parent.is_none() && self.attached && !self.taskbar_checked {
+                        self.taskbar_checked = match canvas_sidekick_rust::desktop::hide_from_taskbar(xid, false) {
+                            Ok(checked) => checked,
+                            Err(error) => {
+                                eprintln!("Could not check Sidekick taskbar hints: {error}");
+                                true
+                            }
+                        };
+                    }
                     #[cfg(target_os = "linux")]
                     if self.parent.is_none() && (!self.attached || self.resize_pending) {
                         let native_scale = ctx.pixels_per_point() / ctx.zoom_factor();
@@ -1228,7 +1248,7 @@ impl eframe::App for App {
                     });
                     return;
                 }
-                if !self.authenticated {
+                if !self.authenticated && !self.credential_read_failed {
                     self.auth(ui);
                     return;
                 }
@@ -1237,6 +1257,7 @@ impl eframe::App for App {
                     return;
                 }
                 self.header(ui);
+                self.canvas_status(ui);
                 let show_add = self.tab == 2 || self.tab == 3;
                 let height = ui.available_height();
                 if self.tab == 0 {
@@ -1431,6 +1452,19 @@ pub fn run() -> eframe::Result<()> {
         "Canvas Sidekick",
         options,
         Box::new(move |cc| {
+            #[cfg(target_os = "linux")]
+            if parent.is_none() && let Ok(handle) = cc.window_handle() {
+                let xid = match handle.as_raw() {
+                    RawWindowHandle::Xlib(handle) => Some(handle.window as u32),
+                    RawWindowHandle::Xcb(handle) => Some(handle.window.get()),
+                    _ => None,
+                };
+                if let Some(xid) = xid {
+                    if let Err(error) = canvas_sidekick_rust::desktop::hide_from_taskbar(xid, true) {
+                        eprintln!("Could not set Sidekick taskbar hints: {error}");
+                    }
+                }
+            }
             #[cfg(target_os = "windows")]
             if parent.is_none() {
                 cc.egui_ctx.set_zoom_factor(0.75);
@@ -1553,8 +1587,10 @@ pub fn run() -> eframe::Result<()> {
                 rt,
                 tx,
                 rx,
-                canvas: None,
                 session: None,
+                session_unsaved: false,
+                reconnect_required: false,
+                credential_read_failed: false,
                 authenticated: false,
                 checking: true,
                 migration_required,
@@ -1572,6 +1608,8 @@ pub fn run() -> eframe::Result<()> {
                 poll_task: None,
                 last_shape: Instant::now(),
                 attached: false,
+                #[cfg(target_os = "linux")]
+                taskbar_checked: false,
                 resize_pending: true,
                 parent,
                 hosted: parent.is_some(),

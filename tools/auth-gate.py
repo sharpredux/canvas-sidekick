@@ -26,6 +26,8 @@ class Canvas(BaseHTTPRequestHandler):
             self.send_response(status)
             self.send_header('Content-Type', mime)
             self.send_header('Location', '/login')
+            if status == 200 and mime == 'application/json' and 'canvas_session=authenticated' in cookie:
+                self.send_header('Set-Cookie', 'canvas_session=verified; Path=/; HttpOnly; SameSite=Lax')
         else:
             stage = self.path.strip('/') or 'preauth'
             next_stage = {'preauth': 'html', 'html': 'error', 'error': 'authenticated'}.get(stage)
@@ -49,9 +51,9 @@ try:
     assert result.returncode == 0, result.stderr
     event = json.loads(result.stdout)
     assert event['type'] == 'authenticated'
-    cookie = next(c for c in event['cookies'] if c['name'] == 'canvas_session')
-    assert cookie['value'] == 'authenticated', 'Pre-authentication or HTML response accepted'
-    assert cookie['httpOnly'], 'Native cookie access must include HttpOnly cookies'
+    cookie = next(c for c in event['cookieStore'] if c['raw_cookie'].startswith('canvas_session='))
+    assert cookie['raw_cookie'].split(';')[0] == 'canvas_session=verified'
+    assert 'HttpOnly' in cookie['raw_cookie'], 'Native cookie access must include HttpOnly cookies'
     assert all('/'+stage in requests for stage in ['html','error','authenticated'])
     assert requests.count('/api/v1/users/self/profile') >= 4
     # Reserve and close a local port: navigation must fail without waiting 180 seconds.

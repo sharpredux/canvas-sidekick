@@ -54,6 +54,38 @@ pub struct Canvas {
     pub origin: String,
     pub jar: Arc<SessionJar>,
 }
+
+#[derive(Debug)]
+pub struct Unauthorized;
+
+impl std::fmt::Display for Unauthorized {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("unauthorized")
+    }
+}
+
+impl std::error::Error for Unauthorized {}
+
+pub struct SessionSync {
+    pub items: Result<Vec<Item>>,
+    pub session: Option<Value>,
+    pub expired: bool,
+}
+
+fn login_redirect(from: &url::Url, to: &url::Url) -> bool {
+    from.origin() == to.origin() && (to.path() == "/login" || to.path().starts_with("/login/"))
+}
+
+fn session_rejected(response: &reqwest::Response) -> bool {
+    response.status() == reqwest::StatusCode::UNAUTHORIZED
+        || (response.status().is_redirection()
+            && response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|location| location.to_str().ok())
+                .and_then(|location| response.url().join(location).ok())
+                .is_some_and(|target| login_redirect(response.url(), &target)))
+}
 pub fn id(v: &Value) -> String {
     v.as_str()
         .map(str::to_owned)
@@ -71,6 +103,13 @@ impl Canvas {
         let jar = Arc::new(SessionJar::default());
         let mut builder = Client::builder()
             .cookie_provider(jar.clone())
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if login_redirect(&attempt.previous()[0], attempt.url()) {
+                    attempt.stop()
+                } else {
+                    reqwest::redirect::Policy::default().redirect(attempt)
+                }
+            }))
             .timeout(std::time::Duration::from_secs(60));
         if let Some(agent) = agent {
             builder = builder.user_agent(agent);
@@ -135,6 +174,79 @@ impl Canvas {
         session.as_object_mut().unwrap().remove("cookies");
         Ok(session)
     }
+    pub async fn verify_profile(&self, agent: Option<&str>) -> Result<()> {
+        let mut builder = Client::builder()
+            .cookie_provider(self.jar.clone())
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(15));
+        if let Some(agent) = agent {
+            builder = builder.user_agent(agent);
+        }
+        let response = builder
+            .build()?
+            .get(format!("{}/api/v1/users/self/profile", self.origin))
+            .header("Accept", "application/json")
+            .header("Cache-Control", "no-store")
+            .send()
+            .await?;
+        if session_rejected(&response) {
+            return Err(Unauthorized.into());
+        }
+        if !response.status().is_success()
+            || !response.headers().get(reqwest::header::CONTENT_TYPE)
+                .and_then(|header| header.to_str().ok())
+                .is_some_and(|header| header.contains("application/json"))
+        {
+            bail!("Canvas profile verification failed (HTTP {}).", response.status());
+        }
+        let profile: Value = response.json().await?;
+        if profile["id"].as_u64().is_none()
+            && !profile["id"].as_str().is_some_and(|id| !id.is_empty())
+        {
+            bail!("Canvas did not return a user profile.");
+        }
+        Ok(())
+    }
+
+    pub async fn sync_session(session: &Value, tracked: &[Item]) -> Result<SessionSync> {
+        let candidate = Self::restore_session(session)?;
+        let original = candidate.session_snapshot(session)?;
+        let items = candidate.fetch(tracked).await;
+        let updated = candidate.session_snapshot(session)?;
+        let changed = updated != original;
+        let rejected = items.as_ref().is_err_and(|error| error.is::<Unauthorized>());
+        let (session, expired) = if items.is_ok() {
+            (Some(updated).filter(|updated| updated != session), false)
+        } else if changed || rejected {
+            let agent = session["userAgent"].as_str();
+            match candidate.verify_profile(agent).await {
+                Ok(()) => (Some(candidate.session_snapshot(session)?).filter(|value| value != session), false),
+                Err(error) if rejected && error.is::<Unauthorized>() => {
+                    if changed {
+                        // A rejected request may have cleared the cookie locally.
+                        let previous = Self::restore_session(session)?;
+                        match previous.verify_profile(agent).await {
+                            Ok(()) => (Some(previous.session_snapshot(session)?).filter(|value| value != session), false),
+                            Err(error) => (None, error.is::<Unauthorized>()),
+                        }
+                    } else {
+                        (None, true)
+                    }
+                }
+                Err(_) => (None, false),
+            }
+        } else {
+            (None, false)
+        };
+        Ok(SessionSync { items, session, expired })
+    }
+
+    async fn optional_pages(&self, url: &str) -> Result<Vec<Value>> {
+        match self.pages(url).await {
+            Err(error) if !error.is::<Unauthorized>() => Ok(Vec::new()),
+            result => result,
+        }
+    }
     pub async fn pages(&self, url: &str) -> Result<Vec<Value>> {
         let mut url = url::Url::parse(url)?;
         if !url.query_pairs().any(|(key, _)| key == "per_page") {
@@ -150,8 +262,8 @@ impl Canvas {
                 .header("Cache-Control", "no-store")
                 .send()
                 .await?;
-            if res.status() == 401 {
-                bail!("unauthorized");
+            if session_rejected(&res) {
+                return Err(Unauthorized.into());
             }
             let res = res.error_for_status()?;
             next = res
@@ -227,7 +339,7 @@ impl Canvas {
                             }
                         }
                     }
-                    Err(e) if e.to_string() == "unauthorized" => return Err(e),
+                    Err(e) if e.is::<Unauthorized>() => return Err(e),
                     Err(_) => {}
                 }
             }
@@ -257,7 +369,7 @@ impl Canvas {
                         .await
                     {
                         Ok(rows) => s = rows.into_iter().next(),
-                        Err(err) if err.to_string() == "unauthorized" => return Err(err),
+                        Err(err) if err.is::<Unauthorized>() => return Err(err),
                         Err(_) => {}
                     }
                 }
@@ -318,24 +430,22 @@ impl Canvas {
             )
             .await?;
         let mut course_map = BTreeMap::new();
-        if let Ok(courses) = self
-            .pages(&format!(
+        let courses = self
+            .optional_pages(&format!(
                 "{}/api/v1/courses?enrollment_state=active",
                 self.origin
             ))
-            .await
-        {
-            for c in courses {
-                if !c["id"].is_null() {
-                    course_map.insert(
-                        format!("course_{}", id(&c["id"])),
-                        c["course_code"]
-                            .as_str()
-                            .or(c["name"].as_str())
-                            .unwrap_or("Canvas Course")
-                            .to_owned(),
-                    );
-                }
+            .await?;
+        for c in courses {
+            if !c["id"].is_null() {
+                course_map.insert(
+                    format!("course_{}", id(&c["id"])),
+                    c["course_code"]
+                        .as_str()
+                        .or(c["name"].as_str())
+                        .unwrap_or("Canvas Course")
+                        .to_owned(),
+                );
             }
         }
         let start = Utc::now() - Duration::days(14);
@@ -346,70 +456,66 @@ impl Canvas {
             }
             u.query_pairs_mut()
                 .append_pair("start_date", &start.to_rfc3339());
-            if let Ok(rows) = self.pages(u.as_str()).await {
-                for a in rows {
-                    let date = a["posted_at"].as_str().or(a["created_at"].as_str());
-                    if !date
-                        .and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok())
-                        .is_some_and(|d| d >= start)
-                    {
-                        continue;
-                    }
-                    items.push(Item {
-                        id: id(&a["id"]),
-                        kind: "announcement".into(),
-                        title: decode(a["title"].as_str().unwrap_or("Announcement")),
-                        course: course_map
-                            .get(a["context_code"].as_str().unwrap_or(""))
-                            .cloned()
-                            .unwrap_or("Canvas Course".into()),
-                        date: date.map(str::to_owned),
-                        preview: Some(strip_html(a["message"].as_str().unwrap_or(""))),
-                        author: Some(
-                            a["user_name"]
-                                .as_str()
-                                .or(a["author"]["display_name"].as_str())
-                                .unwrap_or("Unknown")
-                                .into(),
-                        ),
-                        ..Default::default()
-                    });
+            for a in self.optional_pages(u.as_str()).await? {
+                let date = a["posted_at"].as_str().or(a["created_at"].as_str());
+                if !date
+                    .and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok())
+                    .is_some_and(|d| d >= start)
+                {
+                    continue;
                 }
+                items.push(Item {
+                    id: id(&a["id"]),
+                    kind: "announcement".into(),
+                    title: decode(a["title"].as_str().unwrap_or("Announcement")),
+                    course: course_map
+                        .get(a["context_code"].as_str().unwrap_or(""))
+                        .cloned()
+                        .unwrap_or("Canvas Course".into()),
+                    date: date.map(str::to_owned),
+                    preview: Some(strip_html(a["message"].as_str().unwrap_or(""))),
+                    author: Some(
+                        a["user_name"]
+                            .as_str()
+                            .or(a["author"]["display_name"].as_str())
+                            .unwrap_or("Unknown")
+                            .into(),
+                    ),
+                    ..Default::default()
+                });
             }
         }
-        if let Ok(rows) = self
-            .pages(&format!(
+        for e in self
+            .optional_pages(&format!(
                 "{}/api/v1/users/self/activity_stream",
                 self.origin
             ))
-            .await
+            .await?
         {
-            for e in rows {
-                if e["type"] != "Submission" {
-                    continue;
-                }
-                let context = e["context_code"]
-                    .as_str()
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| format!("course_{}", id(&e["course_id"])));
-                for c in e["submission_comments"].as_array().into_iter().flatten() {
-                    items.push(Item {
-                        id: id(&c["id"]),
-                        kind: "comment".into(),
-                        title: e["title"]
-                            .as_str()
-                            .map(|t| format!("Feedback on {t}"))
-                            .unwrap_or("Feedback on Submission".into()),
-                        course: course_map
-                            .get(&context)
-                            .cloned()
-                            .unwrap_or("Canvas Course".into()),
-                        date: c["created_at"].as_str().map(str::to_owned),
-                        preview: Some(c["comment"].as_str().unwrap_or("").into()),
-                        author: Some(c["author_name"].as_str().unwrap_or("Unknown").into()),
-                        ..Default::default()
-                    });
-                }
+            if e["type"] != "Submission" {
+                continue;
+            }
+            let context = e["context_code"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("course_{}", id(&e["course_id"])));
+            for c in e["submission_comments"].as_array().into_iter().flatten() {
+                items.push(Item {
+                    id: id(&c["id"]),
+                    kind: "comment".into(),
+                    title: e["title"]
+                        .as_str()
+                        .map(|t| format!("Feedback on {t}"))
+                        .unwrap_or("Feedback on Submission".into()),
+                    course: course_map
+                        .get(&context)
+                        .cloned()
+                        .unwrap_or("Canvas Course".into()),
+                    date: c["created_at"].as_str().map(str::to_owned),
+                    preview: Some(c["comment"].as_str().unwrap_or("").into()),
+                    author: Some(c["author_name"].as_str().unwrap_or("Unknown").into()),
+                    ..Default::default()
+                });
             }
         }
         Ok(items)
